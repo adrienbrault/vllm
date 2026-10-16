@@ -1,0 +1,14 @@
+vllm/v1/attention/backends/flashinfer.py
+  h_c86d546d9a059f 188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b11842f68fd6c7c1477c0c5d535a9a4353a6823f",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
