@@ -1,0 +1,20 @@
+vllm/entrypoints/llm.py
+  h_c86d546d9a059f 127-129,204,321
+vllm/model_executor/model_loader/utils.py
+  h_c86d546d9a059f 96,129,135-159
+vllm/model_executor/offloader/base.py
+  h_c86d546d9a059f 63-70
+vllm/model_executor/offloader/uva.py
+  h_c86d546d9a059f 50,56-59,89-92,99-104,112-118,162-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6e32ffa8e3db44889d18642bd7526dbbc84aa996",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
