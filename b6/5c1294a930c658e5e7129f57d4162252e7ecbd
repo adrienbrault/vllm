@@ -1,0 +1,16 @@
+vllm/model_executor/layers/vocab_parallel_embedding.py
+  h_c86d546d9a059f 520-527
+vllm/v1/attention/backends/flashinfer.py
+  h_c86d546d9a059f 1102-1113,1281-1293,1299-1303,1330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b65c1294a930c658e5e7129f57d4162252e7ecbd",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
