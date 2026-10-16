@@ -39,6 +39,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
         tcp_store_group: StatelessProcessGroup | None = None,
         use_all2all: bool = False,
     ):
+        mtp_requested = envs.VLLM_SM12X_PCIE_IPC_MTP
         super().__init__(
             cpu_group,
             device,
@@ -162,6 +163,14 @@ class CudaCommunicator(DeviceCommunicatorBase):
             )
         else:
             logger.info("PCIe IPC all-reduce disabled: knob off or stateless group")
+
+        if mtp_requested and "tp" in unique_name and (
+            self.pcie_ipc_comm is None or self.pcie_ipc_comm.disabled
+        ):
+            raise RuntimeError(
+                "VLLM_SM12X_PCIE_IPC_MTP=1 requires active PCIe IPC all-reduce; "
+                "see rank prerequisites above"
+            )
 
         # AITER custom all-gather/reduce-scatter DP-attention dispatch/combine
         if (

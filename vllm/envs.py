@@ -131,6 +131,7 @@ if TYPE_CHECKING:
     VLLM_USE_HW_AGNOSTIC: bool = False
     VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE: bool = True
     VLLM_SM12X_GDN_PACKED_BV: int | None = None
+    VLLM_SM12X_PCIE_IPC_MTP: bool = False
     VLLM_GDN_DECODE_KERNEL: Literal["cuda", "triton"] = "cuda"
     VLLM_DISABLE_PYNCCL: bool = False
     VLLM_USE_OINK_OPS: bool = False
@@ -609,6 +610,13 @@ def _resolve_rust_cli_path() -> str | None:
             "Build with setuptools-rust or set the path explicitly."
         )
     return raw
+
+
+def _sm12x_pcie_ipc_mtp_enabled() -> bool:
+    value = env_with_choices("VLLM_SM12X_PCIE_IPC_MTP", "0", ["0", "1"])()
+    if value == "1" and os.environ.get("VLLM_SM12X_PCIE_IPC_AR") != "1":
+        raise ValueError("VLLM_SM12X_PCIE_IPC_MTP=1 requires VLLM_SM12X_PCIE_IPC_AR=1")
+    return value == "1"
 
 
 environment_variables: dict[str, Callable[[], Any]] = {
@@ -1226,6 +1234,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE": lambda: bool(
         int(os.getenv("VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE", "1"))
     ),
+    "VLLM_SM12X_PCIE_IPC_MTP": _sm12x_pcie_ipc_mtp_enabled,
     "VLLM_SM12X_GDN_PACKED_BV": lambda: (
         None
         if "VLLM_SM12X_GDN_PACKED_BV" not in os.environ
@@ -2305,6 +2314,9 @@ def compile_factors() -> dict[str, object]:
     Start with every known vLLM env var; drop entries in `ignored_factors`;
     hash everything else. This keeps the cache key aligned across workers."""
     ignored_factors: set[str] = {
+        # Runtime collective dispatch/capture setup; the compiled all_reduce
+        # custom op is unchanged. Keep existing and paired-arm cache keys.
+        "VLLM_SM12X_PCIE_IPC_MTP",
         "MAX_JOBS",
         "VLLM_TRITON_JIT_WARMUP_NUM_THREADS",
         "VLLM_RPC_BASE_PATH",

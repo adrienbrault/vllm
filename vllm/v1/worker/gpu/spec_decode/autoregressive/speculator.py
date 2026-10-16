@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+from contextlib import nullcontext
 from typing import Any
 
 import torch
 import torch.nn as nn
 
+import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.config.compilation import CUDAGraphMode
+from vllm.distributed.parallel_state import get_tp_group
 from vllm.forward_context import BatchDescriptor, set_forward_context
 from vllm.logger import init_logger
 from vllm.triton_utils import tl, triton
@@ -141,6 +144,33 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
         )
 
     def capture(self) -> None:
+        pcie_comm = None
+        if envs.VLLM_SM12X_PCIE_IPC_MTP:
+            from pcie_ipc_ar21.fixed_config import MAX_ROWS
+
+            pcie_comm = getattr(get_tp_group().device_communicator, "pcie_ipc_comm", None)
+            if self.method != "mtp" or pcie_comm is None or pcie_comm.disabled:
+                raise RuntimeError("PCIe IPC MTP capture requires an active MTP communicator")
+            assert self.prefill_cudagraph_manager is not None
+            # Read the actual padded descriptors, including PIECEWISE prefill.
+            prefill_rows = {
+                desc.num_tokens
+                for descs in self.prefill_cudagraph_manager._capture_descs.values()
+                for desc in descs
+            }
+            decode_rows = set()
+            if self.num_speculative_steps > 1:
+                assert self.decode_cudagraph_manager is not None
+                for descs in self.decode_cudagraph_manager._capture_descs.values():
+                    for desc in descs:
+                        if desc.num_tokens != desc.num_reqs:
+                            raise ValueError("PCIe IPC MTP decode requires one row per request")
+                        decode_rows.add(desc.num_reqs)
+            if any(not 1 <= rows <= MAX_ROWS for rows in prefill_rows | decode_rows):
+                raise ValueError(f"PCIe IPC MTP capture rows must be in 1..{MAX_ROWS}")
+            # This bounded metadata superset covers BOTH managers before either
+            # capture starts; it is independent of target shape preparation.
+            pcie_comm.prepare_draft(self.draft_model_config.get_hidden_size(), self.dtype)
         logger.info("Capturing model for speculator...")
         # Reset indices to zeros to prevent stale values from prior
         # dummy runs to cause out-of-bounds indexing during capture.
@@ -160,15 +190,17 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
             self.prefill_cudagraph_manager.init_breakable_cg_runner(self.model)
 
         self.on_prefill_begin(self.max_num_reqs)
-        self.prefill_cudagraph_manager.capture(
-            self._prefill,
-            self.model_state,
-            self.target_input_buffers,
-            self.block_tables,
-            self.target_attn_groups,
-            self.kv_cache_config,
-            progress_bar_desc="Capturing prefill CUDA graphs",
-        )
+        pcie_context = pcie_comm.capture() if pcie_comm is not None else nullcontext()
+        with pcie_context:
+            self.prefill_cudagraph_manager.capture(
+                self._prefill,
+                self.model_state,
+                self.target_input_buffers,
+                self.block_tables,
+                self.target_attn_groups,
+                self.kv_cache_config,
+                progress_bar_desc="Capturing prefill CUDA graphs",
+            )
         self.on_prefill_end(self.max_num_reqs)
 
         if self.num_speculative_steps == 1:
@@ -182,15 +214,17 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
             if self.use_fused_multi_step_decode
             else self._generate_draft
         )
-        self.decode_cudagraph_manager.capture(
-            decode_fn,
-            self.model_state,
-            self.input_buffers,
-            self.block_tables,
-            self.attn_groups,
-            self.kv_cache_config,
-            progress_bar_desc="Capturing decode CUDA graphs",
-        )
+        pcie_context = pcie_comm.capture() if pcie_comm is not None else nullcontext()
+        with pcie_context:
+            self.decode_cudagraph_manager.capture(
+                decode_fn,
+                self.model_state,
+                self.input_buffers,
+                self.block_tables,
+                self.attn_groups,
+                self.kv_cache_config,
+                progress_bar_desc="Capturing decode CUDA graphs",
+            )
         self.on_multi_step_decode_end(self.max_num_reqs)
 
     @torch.inference_mode()

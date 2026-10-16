@@ -12,6 +12,7 @@ from contextlib import nullcontext
 import torch
 import torch.distributed as dist
 
+import vllm.envs as envs
 from vllm.config import get_current_vllm_config_or_none
 from vllm.logger import init_logger
 
@@ -74,6 +75,16 @@ class PcieIpcAllReduce:
             "transplanted from max_numel=41943040 (no boot autotuning)"
         )
 
+        if (self.config.speculative_config is not None
+                and self.config.speculative_config.method == "mtp"):
+            from pcie_ipc_ar21.fixed_config import MAX_ROWS
+
+            logger.info_once(
+                "SM12X PCIe IPC: MTP drafter admitted "
+                "(sequential AutoRegressive drafter, rows<=%d)", MAX_ROWS,
+                scope="process",
+            )
+
     def _disabled_reason(self, allowed, custom_comm, device):
         if not allowed:
             return "custom all-reduce disabled, non-TP group, or non-CUDA platform"
@@ -104,8 +115,20 @@ class PcieIpcAllReduce:
         if model.enable_sleep_mode:
             return "raw IPC allocations do not support sleep/offload lifecycle"
         spec = config.speculative_config
+        mtp_requested = envs.VLLM_SM12X_PCIE_IPC_MTP
         if spec is not None and spec.method != "dflash":
-            return "only the sequential DFlash drafter is supported"
+            if not (mtp_requested and spec.method == "mtp"):
+                return "only the sequential DFlash drafter is supported"
+        if mtp_requested:
+            if spec is None or spec.method != "mtp":
+                return "VLLM_SM12X_PCIE_IPC_MTP=1 requires speculative method mtp"
+            passes = config.compilation_config.pass_config
+            if passes.enable_sp or passes.fuse_gemm_comms or passes.fuse_allreduce_rms:
+                return "PCIe IPC MTP requires unfused tensor-parallel all-reduce dispatch"
+            draft = spec.draft_model_config
+            if (draft.dtype != torch.bfloat16 or draft.get_hidden_size() != 5120
+                    or spec.draft_parallel_config.tensor_parallel_size != 2):
+                return "PCIe IPC MTP requires a bf16 hidden=5120 TP2 drafter"
         return None
 
     @staticmethod
