@@ -299,7 +299,11 @@ class Scheduler(SchedulerInterface):
                 )
             self.use_eagle = speculative_config.use_eagle()
             self.use_eagle_block_drop = speculative_config.use_eagle_block_drop()
-            if self.use_eagle and not self.use_eagle_block_drop:
+            if (
+                self.use_eagle
+                and not self.use_eagle_block_drop
+                and speculative_config.use_eagle_preserves_target_kv_cache()
+            ):
                 logger.warning(
                     "EAGLE trailing prefix-cache block dropping is disabled. "
                     "This is experimental and may affect speculative-token "

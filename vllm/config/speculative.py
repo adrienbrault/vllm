@@ -1941,9 +1941,21 @@ class SpeculativeConfig:
         # TODO(ben): Refactor this so the naming is clearer
         return self.method in ("eagle", "eagle3", "mtp", "dflash", "dspark")
 
+    def use_eagle_preserves_target_kv_cache(self) -> bool:
+        # Only eagle-family drafters share (and pollute via their lookahead KV
+        # write) the target's full-attention KV cache groups. DFlash/DSpark draft
+        # from their own KV cache and never write target blocks, so the KV cache
+        # manager must not apply eagle block handling to them (vllm-project/vllm
+        # #53477, #54163): on a hybrid model in align mode it turns prefix-cache
+        # reuse off entirely.
+        return self.method in ("eagle", "eagle3", "mtp")
+
     def use_eagle_block_drop(self) -> bool:
         """Whether volatile trailing cache blocks should be discarded."""
-        return self.use_eagle() and not self.disable_eagle_block_drop
+        return (
+            self.use_eagle_preserves_target_kv_cache()
+            and not self.disable_eagle_block_drop
+        )
 
     def use_dflash(self) -> bool:
         return self.method == "dflash"

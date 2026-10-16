@@ -2143,7 +2143,7 @@ def _uses_trailing_mtp_layers(vllm_config: VllmConfig) -> bool:
     The annotator separately checks that the groups partition the layers exactly.
     """
     spec_config = vllm_config.speculative_config
-    if spec_config is None or not spec_config.use_eagle():
+    if spec_config is None or not spec_config.use_eagle_preserves_target_kv_cache():
         return False
     if spec_config.method == "mtp":
         return True
@@ -2237,7 +2237,7 @@ def _warn_if_unannotated_eagle_mamba(
 
     """
     spec_config = vllm_config.speculative_config
-    if spec_config is None or not spec_config.use_eagle():
+    if spec_config is None or not spec_config.use_eagle_preserves_target_kv_cache():
         return
     if any(group.is_eagle_group for group in kv_cache_groups):
         return
