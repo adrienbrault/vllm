@@ -6143,13 +6143,26 @@ class GPUModelRunner(
                     | Gemma4Proposer,
                 )
                 assert self.speculative_config is not None
-                # Eagle currently only supports PIECEWISE cudagraphs.
-                # Therefore only use cudagraphs if the main model uses PIECEWISE
-                # NOTE(lucas): this is a hack, need to clean up.
+                use_sm12x_nvfp4_full_drafter_cudagraph = (
+                    current_platform.is_device_capability_family(120)
+                    and str(self.cache_config.cache_dtype).startswith("nvfp4")
+                    and isinstance(
+                        self.drafter,
+                        EagleProposer | DraftModelProposer | Gemma4Proposer,
+                    )
+                )
+                # Supported SM120 NVFP4 LLM-based drafters use FULL for
+                # uniform decode capture. Every other path remains PIECEWISE.
                 use_cudagraphs = (
                     (
                         is_graph_capturing
-                        and cudagraph_runtime_mode == CUDAGraphMode.PIECEWISE
+                        and (
+                            cudagraph_runtime_mode == CUDAGraphMode.PIECEWISE
+                            or (
+                                use_sm12x_nvfp4_full_drafter_cudagraph
+                                and cudagraph_runtime_mode == CUDAGraphMode.FULL
+                            )
+                        )
                     )
                     or (
                         not is_graph_capturing
@@ -6167,12 +6180,26 @@ class GPUModelRunner(
                 ):
                     use_cudagraphs = False
 
-                self.drafter.dummy_run(
-                    num_tokens,
-                    use_cudagraphs=use_cudagraphs,
-                    is_graph_capturing=is_graph_capturing,
-                    slot_mappings=slot_mappings,
-                )
+                if (
+                    is_graph_capturing
+                    and use_cudagraphs
+                    and cudagraph_runtime_mode == CUDAGraphMode.FULL
+                    and use_sm12x_nvfp4_full_drafter_cudagraph
+                ):
+                    self.drafter.dummy_run(
+                        num_tokens,
+                        use_cudagraphs=use_cudagraphs,
+                        is_graph_capturing=is_graph_capturing,
+                        slot_mappings=slot_mappings,
+                        target_cudagraph_mode=cudagraph_runtime_mode,
+                    )
+                else:
+                    self.drafter.dummy_run(
+                        num_tokens,
+                        use_cudagraphs=use_cudagraphs,
+                        is_graph_capturing=is_graph_capturing,
+                        slot_mappings=slot_mappings,
+                    )
 
         # We register layerwise NVTX hooks here after the first dynamo tracing is
         # done to avoid nvtx operations in hook functions being traced by
@@ -7151,7 +7178,19 @@ class GPUModelRunner(
                 | ExtractHiddenStatesProposer
                 | Gemma4Proposer,
             )
-            self.drafter.initialize_cudagraph_keys(cudagraph_mode)
+            if (
+                current_platform.is_device_capability_family(120)
+                and str(self.cache_config.cache_dtype).startswith("nvfp4")
+                and isinstance(
+                    self.drafter,
+                    EagleProposer | DraftModelProposer | Gemma4Proposer,
+                )
+            ):
+                self.drafter.initialize_cudagraph_keys(
+                    cudagraph_mode, allow_full=True
+                )
+            else:
+                self.drafter.initialize_cudagraph_keys(cudagraph_mode)
 
     def calculate_reorder_batch_threshold(self) -> None:
         """Choose the minimum reorder batch threshold from all attention groups.
