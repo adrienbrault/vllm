@@ -21,6 +21,16 @@ TierLabel = tuple[str]
 PRIMARY_TIER_LABEL: TierLabel = ("0:primary",)
 
 
+class FileSystemTierMetrics:
+    """Metric names emitted by FileSystemTierManager."""
+
+    BYTES_USED = "vllm:kv_offload_tiering_fs_bytes_used"
+    FILES = "vllm:kv_offload_tiering_fs_files"
+    EVICTED_FILES = "vllm:kv_offload_tiering_fs_evicted_files"
+    EVICTED_BYTES = "vllm:kv_offload_tiering_fs_evicted_bytes"
+    SKIPPED_STORES = "vllm:kv_offload_tiering_fs_skipped_stores"
+
+
 class _JobMetadataLike(Protocol):
     @property
     def transfer_job(self) -> TransferJob: ...

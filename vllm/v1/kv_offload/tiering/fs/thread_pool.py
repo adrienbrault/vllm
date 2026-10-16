@@ -127,6 +127,13 @@ class DualQueueThreadPool:
                 self._store_q.append((fn, state))
             self._condition.notify(n_tasks)
 
+    def enqueue_store_task(self, task: Callable) -> None:
+        """Enqueue manager housekeeping on the write-priority queue."""
+        with self._condition:
+            self._inflight_jobs += 1
+            self._store_q.append((task, None))
+            self._condition.notify()
+
     def get_finished(self) -> list[tuple[JobId, bool, float]]:
         # No lock needed: deque is thread-safe for concurrent append/popleft,
         # and the manager is the sole popper.
@@ -175,14 +182,21 @@ class DualQueueThreadPool:
                 start_time = time.monotonic()
                 task()
                 transfer_time = time.monotonic() - start_time
+                if state is None:
+                    with self._condition:
+                        self._inflight_jobs -= 1
+                        self._condition.notify_all()
+                    continue
                 job_finished, success, total_time = state.task_done(True, transfer_time)
             except Exception as exc:
                 transfer_time = time.monotonic() - start_time
-                logger.error(
-                    "Job %s block I/O failed: %s",
-                    state.job_id,
-                    exc,
-                )
+                if state is None:
+                    logger.error("Background block I/O failed: %s", exc)
+                    with self._condition:
+                        self._inflight_jobs -= 1
+                        self._condition.notify_all()
+                    continue
+                logger.error("Job %s block I/O failed: %s", state.job_id, exc)
                 job_finished, success, total_time = state.task_done(
                     False, transfer_time
                 )

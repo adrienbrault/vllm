@@ -25,6 +25,9 @@ Configuration via kv_connector_extra_config:
         via SecondaryTierFactory.register_tier()
       - Additional tier-specific parameters are passed directly to the tier
         constructor. See each tier's documentation for supported parameters.
+        The fs tier accepts max_capacity_gb (zero means unlimited),
+        evict_high_ratio, evict_low_ratio, min_free_gb, and evict_scope
+        ("namespace" or "root") in addition to its I/O thread settings.
 
 Example configuration:
 {
@@ -33,8 +36,10 @@ Example configuration:
     "eviction_policy": "lru",
     "secondary_tiers": [
         {
-            "type": "example",
-            "custom_param": 67
+            "type": "fs",
+            "root_dir": "/var/lib/vllm/kv",
+            "max_capacity_gb": 400,
+            "evict_scope": "namespace"
         }
     ]
 }
