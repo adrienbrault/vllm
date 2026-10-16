@@ -1,0 +1,14 @@
+vllm/config/parallel.py
+  h_c86d546d9a059f 872-875
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "58b832d577d53406a9458a32dd2ae5f226c9f43d",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
