@@ -185,7 +185,7 @@ def _maybe_enable_sm12x_nvfp4_prefill_split_kv() -> None:
     # This process-wide, opt-in override restores the 0.6.16 behavior. Keep it
     # off by default because FlashInfer added its guard after observing output
     # corruption for short-Q/long-KV attention with split-KV enabled.
-    setattr(flashinfer_prefill, guard_name, lambda _kv_data_type: False)
+    setattr(flashinfer_prefill, guard_name, lambda *_args, **_kwargs: False)  # r27 A_S: 0.7 guard takes (kv_data_type, device)
     logger.warning_once(
         "VLLM_SM12X_NVFP4_PREFILL_SPLIT_KV=1: re-enabled FlashInfer split-KV "
         "for NVFP4 prefill/verification. Validate output fidelity at long context."
