@@ -296,7 +296,10 @@ def _score_edges(
     anchor_token_ids: torch.Tensor,
     top_k: int,
 ) -> torch.Tensor:
-    successors = successor_table[candidate_ids]
+    # Dummy warmup/cudagraph rows can carry sentinel ids. Keep both compiled
+    # codebook gathers in bounds; real serving ids are unchanged by the clamp.
+    vocab_size = successor_table.shape[0]
+    successors = successor_table[candidate_ids.clamp(0, vocab_size - 1)]
     predecessor_ids = torch.cat(
         (
             anchor_token_ids[:, None, None].expand(-1, 1, top_k),
@@ -304,7 +307,7 @@ def _score_edges(
         ),
         dim=1,
     )
-    predecessors = predecessor_table[predecessor_ids]
+    predecessors = predecessor_table[predecessor_ids.clamp(0, vocab_size - 1)]
     return unary_logits[:, :, None] + torch.einsum(
         "blpr,blcr->blpc", predecessors * hidden[:, :, None], successors
     )
