@@ -607,6 +607,15 @@ class Worker(WorkerBase):
                 getattr(self.parallel_config, "_api_process_count", 1),
             )
 
+        if (
+            current_platform.is_device_capability_family(120)
+            and str(self.cache_config.cache_dtype).startswith("nvfp4")
+        ):
+            # Compile the SM12x FlashInfer NVFP4 JIT kernels outside the memory
+            # profiling window. Other architectures and cache dtypes retain the
+            # stock single profile run below.
+            self.model_runner.profile_run()
+
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
         with (
