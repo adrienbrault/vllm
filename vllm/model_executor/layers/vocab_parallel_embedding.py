@@ -517,7 +517,14 @@ class VocabParallelEmbedding(PluggableLayer):
 
     def forward(self, input_):
         if self.tp_size == 1:
-            return self.quant_method.embedding(self, input_.long())
+            # Speculative decode can feed padded slots containing invalid ids.
+            input_mask = (input_ < 0) | (
+                input_ >= self.num_embeddings_per_partition
+            )
+            masked_input = input_.masked_fill(input_mask, 0)
+            output = self.quant_method.embedding(self, masked_input.long())
+            output.masked_fill_(input_mask.unsqueeze(-1), 0)
+            return output
 
         if self.use_fused_embedding:
             output_parallel = ops.vocab_parallel_embedding(

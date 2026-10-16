@@ -1099,6 +1099,18 @@ class FlashInferMetadataBuilder(AttentionMetadataBuilder[FlashInferMetadata]):
 
         use_non_causal = vllm_config.attention_config.use_non_causal
         if has_uniform_batch_support and (not use_non_causal or is_xqa_arch):
+            cache_config = vllm_config.cache_config
+            if (
+                use_non_causal
+                and current_platform.is_device_capability_family(120)
+                and cache_config is not None
+                and str(cache_config.cache_dtype).startswith("nvfp4")
+            ):
+                # Keep the FA2-NVFP4 non-causal path off the custom 0109
+                # uniform graph route. The validated upstream path uses the
+                # ordinary paged wrapper; an eager drafter also isolates it
+                # from the local XQA decode graph.
+                return AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE
             return AttentionCGSupport.UNIFORM_BATCH
         else:
             return AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE
@@ -1266,18 +1278,29 @@ class FlashInferMetadataBuilder(AttentionMetadataBuilder[FlashInferMetadata]):
                 raise NotImplementedError(
                     "FlashInfer non-causal prefill is not supported with DCP yet."
                 )
-            # NVFP4 pages are readable only by the fa2 prefill backend on sm12x
-            # (no sm120 trtllm-gen FMHA; backend="auto" can select a non-fa2
-            # path that misreads nvfp4 pages -> CUDA illegal memory access,
-            # measured R109b). Port of seanyourhighness's overlay approach
-            # (vllm-sm12x-nvfp4-dflash2). Sinks+nvfp4 stays unsupported.
-            noncausal_backend = "fa2" if self.is_kvcache_nvfp4 else "auto"
+            if self.is_kvcache_nvfp4 and not self.use_fa2_nvfp4_kv:
+                # Only the FA2 paged reader (consumer Blackwell sm120/sm121) can
+                # express non-causal attention over NVFP4 KV pages; trtllm-gen
+                # (sm100f) is causal-only. The FA2 path below shares the exact
+                # forward run + V-scale (nvfp4_kv_block_scales) handling as the
+                # causal FA2-NVFP4 prefill, so the non-causal DFlash drafter
+                # reads V-scales identically.
+                raise NotImplementedError(
+                    "FlashInfer non-causal attention with NVFP4 KV cache requires "
+                    "the FA2 paged reader (consumer Blackwell sm120/sm121); "
+                    "trtllm-gen is causal-only."
+                )
+            noncausal_backend = "fa2" if self.use_fa2_nvfp4_kv else "auto"
             if self.is_kvcache_nvfp4 and self.has_sinks:
                 raise NotImplementedError(
                     "FlashInfer non-causal attention with sinks is not "
                     "supported with NVFP4 KV cache."
                 )
-            if self.enable_cuda_graph and not self.has_sinks:
+            if (
+                self.enable_cuda_graph
+                and not self.has_sinks
+                and not self.use_fa2_nvfp4_kv
+            ):
                 assert batch_size > 0
                 wrapper = self._noncausal_prefill_wrappers_cudagraph.get(batch_size)
                 if wrapper is None:
@@ -1304,6 +1327,7 @@ class FlashInferMetadataBuilder(AttentionMetadataBuilder[FlashInferMetadata]):
                     current_platform.is_device_capability(90)
                     or current_platform.is_device_capability_family(120)
                 ):
+                    assert not self.is_kvcache_nvfp4
                     self._noncausal_prefill_wrapper = (
                         BatchAttentionWithAttentionSinkWrapper(
                             self._get_workspace_buffer(),
