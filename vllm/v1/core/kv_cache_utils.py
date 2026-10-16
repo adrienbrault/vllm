@@ -2253,8 +2253,12 @@ def _warn_if_unannotated_eagle_mamba(
         return
     logger.warning(
         "Speculative decoding (method=%s) is enabled but no KV cache group "
-        "could be identified as the draft model's.",
+        "could be identified as the draft model's; non-Mamba groups will be "
+        "conservatively treated as draft groups. Mamba groups %s are exempt "
+        "from this fallback (an attention-only drafter cannot own a Mamba "
+        "group; flagging one would silently disable SSM prefix reuse).",
         spec_config.method,
+        mamba_groups,
     )
 
 
