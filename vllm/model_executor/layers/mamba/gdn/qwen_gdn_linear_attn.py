@@ -1343,7 +1343,12 @@ class QwenGatedDeltaNetAttention(GatedDeltaNetAttention):
                 ],
                 num_accepted_tokens=num_accepted_tokens,
                 query_start_loc=spec_query_start_loc,
-                max_query_len=spec_state_indices_tensor.size(-1),
+                # Keep the contiguous configured-width state table for the
+                # recurrent kernels, but size convolution work to runtime K.
+                max_query_len=(
+                    attn_metadata.spec_query_len
+                    or spec_state_indices_tensor.size(-1)
+                ),
                 validate_data=False,
             )
 
@@ -1716,7 +1721,9 @@ class QwenGatedDeltaNetAttention(GatedDeltaNetAttention):
             conv_state_indices=state_indices[:num_requests, 0],
             num_accepted_tokens=num_accepted_tokens[:num_requests],
             query_start_loc=cu_seqlens[: num_requests + 1],
-            max_query_len=state_indices.size(1),
+            max_query_len=(
+                attn_metadata.spec_query_len or state_indices.size(1)
+            ),
             validate_data=False,
         )
         self._forward_core_decode_spec_post_conv_fused_norm(

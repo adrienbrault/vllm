@@ -106,10 +106,14 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
                 i_t = tl.load(num_accepted_tokens + i_n).to(tl.int64) - 1
             else:
                 i_t = 0
-            # Load state index and check for invalid entries
-            state_idx = tl.load(ssm_state_indices + i_n * stride_indices_seq + i_t).to(
-                tl.int64
-            )
+            # num_accepted_tokens is asynchronous GPU state. Keep a stale or
+            # zero count from indexing another request's state row.
+            idx_in_row = (i_t >= 0) & (i_t < stride_indices_seq)
+            state_idx = tl.load(
+                ssm_state_indices + i_n * stride_indices_seq + i_t,
+                mask=idx_in_row,
+                other=0,
+            ).to(tl.int64)
             # Skip if state index is invalid (NULL_BLOCK_ID=0)
             if state_idx <= 0:
                 return
