@@ -1,0 +1,14 @@
+csrc/libtorch_stable/nvfp4_kv_cache_kernels.cu
+  h_c86d546d9a059f 186-190,285-288,292,339-349,415,429
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d00e8ab8d81d5bdaab15d38158e65e5b28e5e200",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
