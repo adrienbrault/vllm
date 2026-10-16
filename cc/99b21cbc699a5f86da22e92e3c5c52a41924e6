@@ -1,0 +1,16 @@
+vllm/v1/attention/backends/flashinfer.py
+  h_c86d546d9a059f 7,501-504,557-567,795,797-800,806-807,820,824-848,891-895,972-975,1020-1022,1220-1221,1260-1278,1303-1307,1331-1335,1653-1655,1728-1741,1790-1794,1803-1804,1806-1809,1826-1830,1897-1898,1900-1903,1941-1945,1997-1999,2046-2051,2386-2388,2390-2392,2565-2572,2801-2860
+vllm/v1/worker/gpu_worker.py
+  h_c86d546d9a059f 610-618
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cc99b21cbc699a5f86da22e92e3c5c52a41924e6",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
