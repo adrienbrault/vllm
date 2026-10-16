@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import copy
+from contextlib import nullcontext
 from typing import Any
 
 import torch
@@ -8,6 +9,7 @@ import torch.nn as nn
 
 from vllm.config import VllmConfig, replace
 from vllm.config.compilation import CUDAGraphMode
+from vllm.distributed.parallel_state import get_tp_group
 from vllm.forward_context import BatchDescriptor, set_forward_context
 from vllm.logger import init_logger
 from vllm.triton_utils import tl, triton
@@ -162,6 +164,9 @@ class DFlashSpeculator(DraftModelSpeculator):
                 self._speculator_name,
             )
             return
+        pcie_comm = getattr(get_tp_group().device_communicator, "pcie_ipc_comm", None)
+        if pcie_comm is not None and not pcie_comm.disabled:
+            pcie_comm.prepare_draft(self.draft_model_config.get_hidden_size(), self.dtype)
         logger.info("Capturing model for %s speculator...", self._speculator_name)
         # Padded sample rows must not scatter into a live request during capture.
         self.sample_indices.zero_()
@@ -170,19 +175,21 @@ class DFlashSpeculator(DraftModelSpeculator):
         # Capture must not write context K/V.
         self._context_slot_mappings.fill_(PAD_SLOT_ID)
         assert self.query_cudagraph_manager is not None
-        self.query_cudagraph_manager.capture(
-            self._generate_draft,
-            self.input_buffers,
-            self.block_tables,
-            self.attn_groups,
-            self.kv_cache_config,
-            self.max_model_len,
-            causal=self._group_causal,
-            precompute_context_kv=lambda num_reqs: self._precompute_context_kv(
-                0, self._num_graph_context_tokens(num_reqs)
-            ),
-            progress_bar_desc=f"Capturing {self._speculator_name.lower()} CUDA graphs",
-        )
+        pcie_context = pcie_comm.capture() if pcie_comm is not None else nullcontext()
+        with pcie_context:
+            self.query_cudagraph_manager.capture(
+                self._generate_draft,
+                self.input_buffers,
+                self.block_tables,
+                self.attn_groups,
+                self.kv_cache_config,
+                self.max_model_len,
+                causal=self._group_causal,
+                precompute_context_kv=lambda num_reqs: self._precompute_context_kv(
+                    0, self._num_graph_context_tokens(num_reqs)
+                ),
+                progress_bar_desc=f"Capturing {self._speculator_name.lower()} CUDA graphs",
+            )
 
     def load_draft_model(
         self,

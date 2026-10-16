@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 
+import os
 import torch
 from torch.distributed import ProcessGroup
 
@@ -150,6 +151,18 @@ class CudaCommunicator(DeviceCommunicatorBase):
                 ),
             )
 
+        self.pcie_ipc_comm = None
+        if (os.environ.get("VLLM_SM12X_PCIE_IPC_AR", "0") == "1"
+                and tcp_store_group is None):
+            from .pcie_ipc_all_reduce import PcieIpcAllReduce
+
+            self.pcie_ipc_comm = PcieIpcAllReduce(
+                self.cpu_group, self.device, self.ca_comm,
+                use_custom_allreduce and current_platform.is_cuda(),
+            )
+        else:
+            logger.info("PCIe IPC all-reduce disabled: knob off or stateless group")
+
         # AITER custom all-gather/reduce-scatter DP-attention dispatch/combine
         if (
             "dp" in unique_name
@@ -272,6 +285,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
             "NCCL_SYMM_MEM",
             "QUICK_REDUCE",
             "AITER_CUSTOM",
+            "PCIE_IPC",
             "CUSTOM",
             "SYMM_MEM",
             "PYNCCL",
@@ -316,6 +330,8 @@ class CudaCommunicator(DeviceCommunicatorBase):
             and not self.aiter_ar_comm.disabled
         ):
             enabled_ar_backends.append("AITER_CUSTOM")
+        if self.pcie_ipc_comm is not None and not self.pcie_ipc_comm.disabled:
+            enabled_ar_backends.append("PCIE_IPC")
         if self.ca_comm is not None and not self.ca_comm.disabled:
             enabled_ar_backends.append("CUSTOM")
         if self.symm_mem_comm is not None and not self.symm_mem_comm.disabled:
@@ -377,6 +393,9 @@ class CudaCommunicator(DeviceCommunicatorBase):
             out = aiter_ar_comm.custom_all_reduce(input_)
             assert out is not None
             return out
+        pcie_ipc_comm = self.pcie_ipc_comm
+        if pcie_ipc_comm is not None and pcie_ipc_comm.should_use(input_):
+            return pcie_ipc_comm.all_reduce(input_)
         ca_comm = self.ca_comm
         if (
             ca_comm is not None

@@ -1615,12 +1615,20 @@ def init_worker_distributed_environment(
         timeout,
     )
 
-    ensure_model_parallel_initialized(
-        parallel_config.tensor_parallel_size,
-        parallel_config.pipeline_parallel_size,
-        parallel_config.prefill_context_parallel_size,
-        parallel_config.decode_context_parallel_size,
+    # Make the opt-in communicator's shape and stream safety gates available
+    # at construction, before init_snapshot and determine_available_memory.
+    pcie_config_context = (
+        set_current_vllm_config(vllm_config)
+        if os.environ.get("VLLM_SM12X_PCIE_IPC_AR", "0") == "1"
+        else nullcontext()
     )
+    with pcie_config_context:
+        ensure_model_parallel_initialized(
+            parallel_config.tensor_parallel_size,
+            parallel_config.pipeline_parallel_size,
+            parallel_config.prefill_context_parallel_size,
+            parallel_config.decode_context_parallel_size,
+        )
 
     # Init ec connector here before KV caches init
     # NOTE: We do not init KV caches for Encoder-only instance in EPD disagg mode

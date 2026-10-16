@@ -678,6 +678,7 @@ class GroupCoordinator:
         # only cuda/rocm uses this function,
         # so we don't abstract it into the base class
         maybe_ca_context = nullcontext()
+        maybe_pcie_context = nullcontext()
         maybe_fi_pcie_ipc_context: AbstractContextManager[Any] = nullcontext()
         maybe_aiter_ar_context = nullcontext()
         from vllm.distributed.device_communicators.cuda_communicator import (
@@ -692,6 +693,11 @@ class GroupCoordinator:
                 self.device_communicator,
                 (CudaCommunicator, XpuCommunicator),
             )
+            pcie_comm = getattr(self.device_communicator, "pcie_ipc_comm", None)
+            if pcie_comm is not None and not pcie_comm.disabled:
+                # Before stream switch, warmups, or any real CUDA capture.
+                pcie_comm.prepare_for_capture()
+                maybe_pcie_context = pcie_comm.capture()
             ca_comm = self.device_communicator.ca_comm
             if ca_comm is not None:
                 maybe_ca_context = ca_comm.capture()  # type: ignore
@@ -716,6 +722,7 @@ class GroupCoordinator:
             maybe_ca_context,
             maybe_fi_pcie_ipc_context,
             maybe_aiter_ar_context,
+            maybe_pcie_context,
         ):
             yield graph_capture_context
 
@@ -1378,6 +1385,10 @@ class GroupCoordinator:
         return self.device_communicator.recv(size, dtype, src)
 
     def destroy(self):
+        # PCIe IPC unmapping/freeing is collective and needs the CPU group alive.
+        pcie_comm = getattr(self.device_communicator, "pcie_ipc_comm", None)
+        if pcie_comm is not None:
+            pcie_comm.destroy()
         # Device communicators can own collective workspaces whose teardown
         # uses these process groups (for example FlashInfer PCIe IPC barriers).
         # Release them before destroying the groups they depend on.
