@@ -1,0 +1,24 @@
+vllm/distributed/device_communicators/cuda_communicator.py
+  h_c86d546d9a059f 5,154-165,288,333-334,396-398
+vllm/distributed/device_communicators/pcie_ipc_all_reduce.py
+  h_c86d546d9a059f 1-189
+vllm/distributed/parallel_state.py
+  h_c86d546d9a059f 681,696-700,725,1388-1391
+vllm/v1/worker/gpu/model_runner.py
+  h_c86d546d9a059f 22,40,1020-1022,1044-1047
+vllm/v1/worker/gpu/spec_decode/dflash/speculator.py
+  h_c86d546d9a059f 4,12,167-169,178-192
+vllm/v1/worker/gpu_worker.py
+  h_c86d546d9a059f 1618-1623,1625-1631
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "11981a184a0924d7045b589ecd9df9fd9f8299c3",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
