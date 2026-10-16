@@ -1,0 +1,14 @@
+vllm/model_executor/warmup/kernel_warmup.py
+  h_c86d546d9a059f 483-493
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ddb6746a02a5ebb628b4ba5ef178e7e22a3a453e",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
