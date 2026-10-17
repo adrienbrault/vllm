@@ -246,13 +246,19 @@ class PleOffloadWorker:
     ) -> None:
         """Load PLE weights, accept registrations, and run the request loop."""
         decorate_logs("PleOffloadWorker")
+        # CMP 170HX port: this process builds the whole model in a one-stage world, so an uneven pipeline split
+        # (VLLM_PP_LAYER_PARTITION="26,22") fails get_pp_indices here ("len(partitions)=2 does not match pp_size=1").
+        # The GPU stages register their own layers by name; this process needs no partition.
+        os.environ.pop("VLLM_PP_LAYER_PARTITION", None)
         if os.environ.get("QWEN38_CPU_EXPERTS") == "1":
             # Keep PLE lookups off the SMT siblings of the CPU expert pool's cores (vllm/qwen38_host.py).
             from vllm import qwen38_host
             os.sched_setaffinity(0, set(qwen38_host.main_cpus()))
+        if os.environ.get("QWEN38_CPU_EXPERTS") == "1" or os.environ.get("QWEN38_PLE_THREADS"):
             # The row gathers are page-fault bound (MADV_WILLNEED already overlaps the NVMe reads), so a few
             # intra-op threads suffice; one spinning OpenMP thread per CPU took the cores that the GPU worker
-            # needs to issue prefill kernels on machines with 16 cores or fewer.
+            # needs to issue prefill kernels on machines with 16 cores or fewer. CMP 170HX port: QWEN38_PLE_THREADS
+            # also applies without the CPU expert pool (all experts on the GPUs).
             torch.set_num_threads(max(1, int(os.environ.get("QWEN38_PLE_THREADS", "4"))))
         ready_reader, ready_writer = ready_pipe
         ready_reader.close()
