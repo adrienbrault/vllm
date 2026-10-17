@@ -9,10 +9,10 @@ RUN python3 /opt/qwen38/runtime/install_overlay.py /opt/qwen38/runtime/vllm-over
 # Exact-size pinned expert backing (used by tiered prefill). Build its small
 # C++ host-allocator extension now so serving never compiles it at startup.
 ENV MAX_JOBS=1 VLLM_EXACT_PINNED_WEIGHTS=1
-RUN TORCH_CUDA_ARCH_LIST=8.6 python3 -c 'from vllm.model_executor.offloader.exact_pinned import extension; extension()'
+RUN TORCH_CUDA_ARCH_LIST=8.0 python3 -c 'from vllm.model_executor.offloader.exact_pinned import extension; extension()'
 
 # CPU cold-expert kernel and GPU bridge for the 64 GB profile (configs/2x3090-64gb.env), compiled once here
-# (x86-64 AVX2/FMA/F16C; sm_86 plus PTX). The 128 GB profiles never load it.
+# (x86-64 AVX2/FMA/F16C; sm_80 plus PTX: CMP 170HX). The 128 GB profiles never load it.
 ENV QWEN38_CPU_EXPERTS_BUILD=/opt/qwen38/cpu_experts
 RUN MAX_JOBS=2 python3 -c 'from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.cpu_experts import build_extension; build_extension(verbose=True)'
 

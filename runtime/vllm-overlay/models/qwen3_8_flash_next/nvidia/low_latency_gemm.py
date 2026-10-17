@@ -166,7 +166,7 @@ def enable_qwen38next_low_latency_gemm(
     import logging
     log = logging.getLogger("vllm.qwen38.triton_skinny")
     # SM 8.6 (RTX 3090) and SM 8.9 (RTX 4090, issue #40: same kernel, identical output, ~10% faster decode).
-    supported = any(current_platform.is_device_capability(cc) for cc in ((8, 6), (8, 9)))
+    supported = any(current_platform.is_device_capability(cc) for cc in ((8, 0), (8, 6), (8, 9)))   # + SM 8.0 (GA100, CMP 170HX)
     if _TRITON_SKINNY and not supported:
         log.warning("QWEN38_TRITON_SKINNY=1 ignored: the skinny GEMM is enabled only on SM 8.6 and 8.9 GPUs")
     if _TRITON_SKINNY and dtype == torch.bfloat16 and supported:
