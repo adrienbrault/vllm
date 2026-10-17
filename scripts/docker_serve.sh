@@ -4,6 +4,8 @@ set -euo pipefail
 image=${IMAGE:-qwen38-flash-next-2x3090:locked}
 model_dir=${MODEL_DIR:?Set MODEL_DIR to the assembled/downloaded model directory}
 port=${PORT:-8000}
+# CMP 170HX port: PUBLISH_ADDR = host address the API is published on (default loopback; the LAN address for a server other
+# hosts reach; set VLLM_API_KEY then).
 qsa_exact=${VLLM_QSA_EXACT_TOPK:-0}
 
 if [[ ${DISABLE_CUSTOM_ALL_REDUCE+x} ]]; then
@@ -32,6 +34,7 @@ for name in \
   VLLM_WNA16_STATIC_HOT_CACHE_SIZE \
   VLLM_WNA16_STATIC_HOT_CACHE_MAX_TOKENS \
   VLLM_PREFIX_CACHE_RETENTION_INTERVAL \
+  VLLM_PP_LAYER_PARTITION \
   DISABLE_CUSTOM_ALL_REDUCE \
   PYTORCH_CUDA_ALLOC_CONF \
   ENABLE_VISION \
@@ -101,7 +104,7 @@ exec docker run --rm \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
   ${limit_args[@]+"${limit_args[@]}"} \
-  -p "127.0.0.1:$port:$port" \
+  -p "${PUBLISH_ADDR:-127.0.0.1}:$port:$port" \
   "${docker_env[@]}" \
   ${cache_mounts[@]+"${cache_mounts[@]}"} \
   -v "$model_dir:/model:ro" \
