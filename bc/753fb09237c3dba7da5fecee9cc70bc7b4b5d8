@@ -1,0 +1,18 @@
+.dockerignore
+  h_c86d546d9a059f 10
+docker/Dockerfile
+  h_c86d546d9a059f 22-24
+scripts/complete_rankings.py
+  h_c86d546d9a059f 1-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bc753fb09237c3dba7da5fecee9cc70bc7b4b5d8",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
