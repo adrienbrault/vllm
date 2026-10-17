@@ -109,6 +109,12 @@ else
   offload_args=(--offload-backend uva --cpu-offload-gb "$CPU_OFFLOAD_GB" --cpu-offload-params experts)
 fi
 
+# MTP_DEPTH=0: no drafter at all (CMP 170HX port: num_speculative_tokens 0 would still build a speculator).
+spec_args=()
+if [[ "${MTP_DEPTH:-0}" != 0 ]]; then
+  spec_args=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_DEPTH,\"use_local_argmax_reduction\":true,\"model\":\"$mtp_model\"}")
+fi
+
 # Extra `vllm serve` arguments, appended last so they override the flags above. Split on whitespace:
 # a single argument cannot contain spaces (write JSON values without them).
 read -r -a extra_vllm_args <<< "${EXTRA_VLLM_ARGS:-}"
@@ -141,6 +147,5 @@ exec vllm serve "$model" \
   --enable-auto-tool-choice \
   --tool-call-parser qwen3_coder \
   --reasoning-parser qwen3 \
-  --speculative-config \
-  "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_DEPTH,\"use_local_argmax_reduction\":true,\"model\":\"$mtp_model\"}" \
+  ${spec_args[@]+"${spec_args[@]}"} \
   ${extra_vllm_args[@]+"${extra_vllm_args[@]}"}
