@@ -1,0 +1,26 @@
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 3,12-13,15,50
+runtime/vllm-overlay/model_executor/layers/fused_moe/hot_only.py
+  h_c86d546d9a059f 58-59,62-63,68-79
+runtime/vllm-overlay/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py
+  h_c86d546d9a059f 1673
+runtime/vllm-overlay/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/cpu_experts.py
+  h_c86d546d9a059f 77-79,107-109,139
+runtime/vllm-overlay/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/expert_store.py
+  h_c86d546d9a059f 59-62,84-85,92-95,229-230
+runtime/vllm-overlay/qwen38_host.py
+  h_c86d546d9a059f 226-228,231,238,259-260,267,269
+scripts/serve-container.sh
+  h_c86d546d9a059f 84-87,104-105,119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "df4574c7db5d26523f261796c83511576448ff7f",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
