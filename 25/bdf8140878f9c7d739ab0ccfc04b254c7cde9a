@@ -1,0 +1,14 @@
+scripts/docker_serve.sh
+  h_c86d546d9a059f 7-8,37,107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "25bdf8140878f9c7d739ab0ccfc04b254c7cde9a",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
