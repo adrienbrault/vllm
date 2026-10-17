@@ -1,0 +1,16 @@
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 42
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/mtp.py
+  h_c86d546d9a059f 291-293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6862f5417e757bfaf61a6db57f0eccc1f01fd294",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
