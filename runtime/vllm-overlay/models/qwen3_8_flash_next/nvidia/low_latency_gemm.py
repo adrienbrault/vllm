@@ -127,11 +127,19 @@ class Qwen38NextLowLatencyEmbeddingMethod(
 
 import os as _os
 _TRITON_SKINNY = _os.environ.get("QWEN38_TRITON_SKINNY", "0") == "1"
+_GLUON_THIN = _os.environ.get("QWEN38_GLUON_THIN", "0") in ("1", "exact")
+_HORIZONTAL = _os.environ.get("QWEN38_SKINNY_HORIZONTAL", "0") == "1"
+_SKINNY_MAX_M = 16 if _os.environ.get("QWEN38_SKINNY_M16", "0") == "1" else 8
 
 
 def _qwen38next_low_latency_gemm(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
     if _TRITON_SKINNY:
-        if x.dim() == 2 and x.shape[0] <= 8 and _runtime_ok(x, weight):
+        if _GLUON_THIN and _runtime_ok(x, weight):
+            from .gluon_thin import try_mm
+            result = try_mm(x, weight)
+            if result is not None:
+                return result
+        if x.dim() == 2 and 1 <= x.shape[0] <= _SKINNY_MAX_M and _runtime_ok(x, weight):
             from .triton_skinny import skinny_mm
             return skinny_mm(x, weight)
         return torch.nn.functional.linear(x, weight)
@@ -168,7 +176,7 @@ def enable_qwen38next_low_latency_gemm(
     # SM 8.6 (RTX 3090) and SM 8.9 (RTX 4090, issue #40: same kernel, identical output, ~10% faster decode).
     supported = any(current_platform.is_device_capability(cc) for cc in ((8, 0), (8, 6), (8, 9)))   # + SM 8.0 (GA100, CMP 170HX)
     if _TRITON_SKINNY and not supported:
-        log.warning("QWEN38_TRITON_SKINNY=1 ignored: the skinny GEMM is enabled only on SM 8.6 and 8.9 GPUs")
+        log.warning("QWEN38_TRITON_SKINNY=1 ignored: the skinny GEMM is enabled only on SM 8.0, 8.6 and 8.9 GPUs")
     if _TRITON_SKINNY and dtype == torch.bfloat16 and supported:
         shapes = []
         for child in module.modules():
@@ -219,3 +227,83 @@ def enable_qwen38next_low_latency_gemm(
 
     if warmup_configs:
         shape_dynamic_skinny_gemm.request_warmup_configs(dtype, warmup_configs)
+
+
+def _horizontal_gemm(x: torch.Tensor, weight: torch.Tensor,
+                     widths: list[int]) -> torch.Tensor:
+    from .triton_skinny import horizontal_mm
+    return horizontal_mm(x, weight, widths)
+
+
+def _horizontal_gemm_fake(x: torch.Tensor, weight: torch.Tensor,
+                          widths: list[int]) -> torch.Tensor:
+    return x.new_empty((x.shape[0] * weight.shape[0],))
+
+
+direct_register_custom_op(
+    op_name="qwen38_horizontal_gemm", op_func=_horizontal_gemm,
+    fake_impl=_horizontal_gemm_fake,
+)
+
+
+def horizontal_linear(owner: nn.Module, x: torch.Tensor):
+    """Return contiguous output views, or None to retain standard dispatch."""
+    weight = getattr(owner, "_qwen38_horizontal_weight", None)
+    if (weight is None or x.dim() != 2 or not 1 <= x.shape[0] <= _SKINNY_MAX_M
+            or not _runtime_ok(x, weight)):
+        return None
+    widths = owner._qwen38_horizontal_widths
+    flat = torch.ops.vllm.qwen38_horizontal_gemm(x, weight, list(widths))
+    return tuple(t.view(x.shape[0], n) for t, n in zip(
+        flat.split([x.shape[0] * n for n in widths]), widths))
+
+
+def prepare_horizontal_gemms(module: nn.Module) -> None:
+    """Called by the loader's model-level post-load hook, before graph capture.
+
+    Keep checkpoint Parameter objects/metadata for fallback and reloading, but
+    rebind their storage to views of the cat to avoid duplicating dense weights.
+    The buffer is rebuilt after each load and is not checkpointed.
+    Only known direct consumers are enrolled. In particular no MoE callback
+    caches input-dependent results across an opaque/custom-op boundary.
+    """
+    if _TRITON_SKINNY and _GLUON_THIN and not envs.VLLM_BATCH_INVARIANT:
+        from .gluon_thin import MODE, prepare
+        if MODE in ("1", "exact"):
+            weights = []
+            for child in module.modules():
+                if type(getattr(child, "quant_method", None)) not in (
+                        Qwen38NextLowLatencyLinearMethod, Qwen38NextLowLatencyEmbeddingMethod):
+                    continue
+                weight = child.weight
+                weights.append(weight)
+                if (isinstance(child, ParallelLMHead) and tuple(weight.shape) == (248320, 2560)
+                        and _os.getenv("VLLM_MTP_DRAFT_VOCAB_RANGES")):
+                    from .draft_vocab import parse_ranges
+                    weights.extend(weight[a:b] for a, b in parse_ranges(
+                        _os.environ["VLLM_MTP_DRAFT_VOCAB_RANGES"], weight.shape[0]))
+            prepare(weights)
+    if not (_TRITON_SKINNY and _HORIZONTAL) or envs.VLLM_BATCH_INVARIANT:
+        return
+    for owner in list(module.modules()):
+        pairs = (("in_proj_qkvz", "in_proj_ba"), ("key_proj", "value_proj"))
+        for names in pairs:
+            children = [getattr(owner, name, None) for name in names]
+            if not all(isinstance(c, LinearBase) for c in children):
+                continue
+            # Exclude quantized, LoRA and unsupported-device linears. The
+            # constructor's skinny enrollment is the authority on eligibility.
+            if not all(type(c.quant_method) is Qwen38NextLowLatencyLinearMethod
+                       and c.bias is None for c in children):
+                continue
+            weights = [c.weight for c in children]
+            if not all(_is_packed_row_major(w) and w.dtype == torch.bfloat16
+                       and w.is_cuda and w.device == weights[0].device
+                       and w.shape[1] == weights[0].shape[1] for w in weights):
+                continue
+            widths = tuple(w.shape[0] for w in weights)
+            packed = torch.cat(weights, dim=0)
+            owner.register_buffer("_qwen38_horizontal_weight", packed, persistent=False)
+            for child, view in zip(children, packed.split(widths, dim=0)):
+                child.weight.data = view
+            owner._qwen38_horizontal_widths = widths

@@ -907,8 +907,15 @@ class QwenGatedDeltaNetAttention(GatedDeltaNetAttention):
         # ============================================================
         # Part 1: Input Projection
         # ============================================================
-        mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)
-        ba, _ = self.in_proj_ba(hidden_states)
+        projected = None
+        if hasattr(self, "_qwen38_horizontal_weight"):
+            from vllm.models.qwen3_8_flash_next.nvidia.low_latency_gemm import horizontal_linear
+            projected = horizontal_linear(self, hidden_states)
+        if projected is None:
+            mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)
+            ba, _ = self.in_proj_ba(hidden_states)
+        else:
+            mixed_qkvz, ba = projected
 
         use_fused_gdn_decode = (
             self.enable_fused_gdn_decode

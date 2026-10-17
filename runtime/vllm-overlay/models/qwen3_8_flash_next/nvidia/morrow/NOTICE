@@ -1,0 +1,4 @@
+Thin GEMM code from Morrowmake/vllm-cmp170hx, ampere branch,
+commit 701e877bef32b730a49731a9357d9fa5c7098056 (Apache-2.0).
+Copyright contributors to the vLLM project. Kernel source is unchanged apart
+from this distribution's origin comment; TP1 dispatch and warmup are separate.

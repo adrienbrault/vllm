@@ -49,7 +49,9 @@ from vllm.transformers_utils.configs.qwen3_8_flash_next import (
 )
 
 from .hyperconnection import GatedResidual, HyperConnectionConfig
-from .low_latency_gemm import enable_qwen38next_low_latency_gemm
+from .low_latency_gemm import (
+    enable_qwen38next_low_latency_gemm, prepare_horizontal_gemms,
+)
 from . import abliteration
 from .model import (
     _HC_WEIGHTS_MAPPER,
@@ -483,6 +485,9 @@ class Qwen3_8FlashNextMTP(nn.Module, SupportsPP, Qwen3_8FlashNextMixtureOfExpert
             return _q38_top(self.logits_processor, self.lm_head, hidden_states,
                             self._draft_vocab_ranges, tensor_model_parallel_all_gather)
         return self.logits_processor.get_top_tokens(self.lm_head, hidden_states)
+
+    def process_weights_after_loading(self) -> None:
+        prepare_horizontal_gemms(self)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         def remap_weight_names():

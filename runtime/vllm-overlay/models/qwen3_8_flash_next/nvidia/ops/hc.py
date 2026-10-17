@@ -1,5 +1,7 @@
 import os as _q38_os
 _QWEN38_TRITON_SKINNY = _q38_os.environ.get("QWEN38_TRITON_SKINNY", "0") == "1"
+_QWEN38_GLUON_THIN = _q38_os.environ.get("QWEN38_GLUON_THIN", "0") in ("1", "exact")
+_QWEN38_SKINNY_MAX_M = 16 if _q38_os.environ.get("QWEN38_SKINNY_M16", "0") == "1" else 8
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """NVIDIA HyperConnection kernels for Qwen3.8-Flash-Next."""
@@ -211,7 +213,13 @@ def _hc_project_gate_mix(
     assert chunk_tokens > 0
 
     if num_tokens <= chunk_tokens:
-        if (num_tokens <= 8 and _QWEN38_TRITON_SKINNY and lora.dtype == torch.bfloat16
+        gate = None
+        if _QWEN38_TRITON_SKINNY and _QWEN38_GLUON_THIN:
+            from ..gluon_thin import try_mm
+            gate = try_mm(lora, weight)
+        if gate is not None:
+            return _hc_gate_mix(x, gate, hc_count)
+        if (num_tokens <= _QWEN38_SKINNY_MAX_M and _QWEN38_TRITON_SKINNY and lora.dtype == torch.bfloat16
                 and weight.dtype == torch.bfloat16 and lora.is_contiguous() and weight.is_contiguous()):
             from ..triton_skinny import skinny_mm
             gate = skinny_mm(lora, weight)

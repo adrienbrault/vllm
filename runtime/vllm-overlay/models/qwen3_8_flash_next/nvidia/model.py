@@ -79,7 +79,9 @@ from vllm.v1.kv_cache_interface import MambaSpec
 from ..config import Qwen3_8FlashNextConfig
 from . import abliteration
 from .hyperconnection import GatedResidual, HyperConnectionConfig
-from .low_latency_gemm import enable_qwen38next_low_latency_gemm
+from .low_latency_gemm import (
+    enable_qwen38next_low_latency_gemm, prepare_horizontal_gemms,
+)
 from .ple_layer import Qwen3_8FlashNextPLELayer
 from .qsa import Qwen3_8FlashNextQSAAttention
 
@@ -910,6 +912,9 @@ class Qwen3_8FlashNextForCausalLM(
         positions = torch.arange(len(input_tokens), dtype=torch.long)
         return positions.unsqueeze(0).expand(3, -1), 0
 
+    def process_weights_after_loading(self) -> None:
+        prepare_horizontal_gemms(self)
+
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(
             self,
@@ -1101,6 +1106,9 @@ class Qwen3_8FlashNextForConditionalGeneration(
         if inputs_embeds is not None and get_pp_group().is_first_rank:
             self._clear_deepstack_input_embeds(inputs_embeds.size(0))
         return hidden_states
+
+    def process_weights_after_loading(self) -> None:
+        prepare_horizontal_gemms(self)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(

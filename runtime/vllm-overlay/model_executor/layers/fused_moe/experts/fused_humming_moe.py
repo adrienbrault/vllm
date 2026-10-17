@@ -4,6 +4,7 @@
 
 import json
 import math
+import os
 from typing import TYPE_CHECKING, Any, cast
 
 import torch
@@ -74,6 +75,7 @@ if TYPE_CHECKING:
 
 
 logger = init_logger(__name__)
+QWEN38_MOE_DECODE = os.environ.get("QWEN38_MOE_DECODE", "0") == "1"
 
 
 def get_humming_moe_gemm_type() -> str:
@@ -575,6 +577,31 @@ class HummingExpertsBase(mk.FusedMoEExpertsModular):
 
 
 class HummingIndexedExperts(HummingExpertsBase):
+    def _use_decode(
+        self, topk_ids: torch.Tensor, expert_map: torch.Tensor | None
+    ) -> bool:
+        if not QWEN38_MOE_DECODE:
+            return False
+        meta1, meta2 = self.humming_configs["w13"], self.humming_configs["w2"]
+        return (
+            topk_ids.ndim == 2 and 1 <= topk_ids.size(0) <= 16
+            and topk_ids.size(1) == 10 and topk_ids.is_contiguous()
+            and topk_ids.dtype in (torch.int32, torch.int64)
+            and topk_ids.is_cuda and self.global_num_experts == 512
+            and meta1.shape_k - meta1.pad_shape_k == 2560
+            and meta1.shape_n - meta1.pad_shape_n == 1280
+            and meta2.shape_k - meta2.pad_shape_k == 640
+            and meta2.shape_n - meta2.pad_shape_n == 2560
+            and meta1.a_dtype.num_bits == meta1.c_dtype.num_bits == 16
+            and meta2.a_dtype.num_bits == meta2.c_dtype.num_bits == 16
+            and meta1.b_dtype.num_bits == meta2.b_dtype.num_bits == 4
+            and (expert_map is None or (
+                expert_map.shape == (512,) and expert_map.is_contiguous()
+                and expert_map.dtype in (torch.int32, torch.int64)
+                and expert_map.device == topk_ids.device))
+            and current_platform.is_device_capability(80, topk_ids.device.index)
+        )
+
     def finalize_weight_and_reduce_impl(self) -> mk.TopKWeightAndReduce:
         return TopKWeightAndReduceNoOP()
 
@@ -609,13 +636,19 @@ class HummingIndexedExperts(HummingExpertsBase):
             )
             moe_block_size = 64
 
-        sorted_ids, expert_ids, num_tokens_padded = moe_align_block_size(
-            topk_ids=topk_ids,
-            block_size=moe_block_size,
-            num_experts=self.global_num_experts,
-            expert_map=expert_map,
-            ignore_invalid_experts=True,
-        )
+        if moe_block_size == 16 and self._use_decode(topk_ids, expert_map):
+            from vllm.model_executor.layers.fused_moe.moe_decode import align_decode
+
+            sorted_ids, expert_ids, num_tokens_padded = align_decode(
+                topk_ids, expert_map, moe_block_size)
+        else:
+            sorted_ids, expert_ids, num_tokens_padded = moe_align_block_size(
+                topk_ids=topk_ids,
+                block_size=moe_block_size,
+                num_experts=self.global_num_experts,
+                expert_map=expert_map,
+                ignore_invalid_experts=True,
+            )
 
         moe_common_kwargs = {
             "sorted_ids": sorted_ids,
@@ -734,7 +767,12 @@ class HummingIndexedExperts(HummingExpertsBase):
             **moe_kwargs2,
         )
 
-        moe_fused_mul_sum(
+        combine = moe_fused_mul_sum
+        if self._use_decode(topk_ids, expert_map):
+            from vllm.model_executor.layers.fused_moe.moe_decode import combine_decode
+
+            combine = combine_decode
+        combine(
             inputs=buffers["down_output"].view(*topk_ids.shape, -1),
             topk_weights=topk_weights,
             topk_ids=topk_ids,

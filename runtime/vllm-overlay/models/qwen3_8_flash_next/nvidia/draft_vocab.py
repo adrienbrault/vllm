@@ -7,6 +7,10 @@ languages. Ranges let us use views of the existing TP-sharded head, rather
 than allocate another head beside an already tight full-context KV cache.
 """
 import json
+import os
+
+_MAX_M = 16 if os.getenv("QWEN38_SKINNY_M16", "0") == "1" else 8
+_GLUON_THIN = os.getenv("QWEN38_GLUON_THIN", "0") in ("1", "exact")
 
 import torch
 import torch.nn.functional as F
@@ -42,11 +46,15 @@ def local_top_pair(hidden_states, weight, shard_start, shard_end, ranges,
             continue
         # A view, never index_select/contiguous: no duplicate head allocation.
         selected_weight = weight[start - shard_start:end - shard_start]
-        if (hidden_states.shape[0] <= 8 and hidden_states.dtype == torch.bfloat16
+        logits = None
+        if _GLUON_THIN:
+            from .gluon_thin import try_mm
+            logits = try_mm(hidden_states, selected_weight)
+        if logits is None and (hidden_states.shape[0] <= _MAX_M and hidden_states.dtype == torch.bfloat16
                 and selected_weight.is_contiguous() and hidden_states.is_contiguous()):
             from .triton_skinny import skinny_mm
             logits = skinny_mm(hidden_states, selected_weight)
-        else:
+        elif logits is None:
             logits = F.linear(hidden_states, selected_weight)
         if soft_cap is not None:
             logits = torch.tanh(logits / soft_cap) * soft_cap

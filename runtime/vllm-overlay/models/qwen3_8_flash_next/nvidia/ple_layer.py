@@ -1441,8 +1441,13 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
             ngram_context,
         )
         embeddings = self._dequantize_embeddings(embeddings, hidden_states.dtype)
-        key, _ = self.key_proj(embeddings)
-        value, _ = self.value_proj(embeddings)
+        from .low_latency_gemm import horizontal_linear
+        projected = horizontal_linear(self, embeddings)
+        if projected is None:
+            key, _ = self.key_proj(embeddings)
+            value, _ = self.value_proj(embeddings)
+        else:
+            key, value = projected
         abliteration.project_(value, self._abliteration_r)
         token_count = hidden_states.shape[0]
         key = key.reshape(token_count, self.hc_count, self.hidden_size)
