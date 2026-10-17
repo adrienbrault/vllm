@@ -288,7 +288,9 @@ class Qwen3_8FlashNextMultiTokenPredictor(nn.Module):
         hc_count = self.hc_count
         hidden_size = self.hidden_size
 
-        if get_pp_group().is_first_rank:
+        # vLLM builds the speculator on the last PP rank only and runs the whole MTP there: it starts from the
+        # target's hidden states, not from another stage's IntermediateTensors (PP=2, 2026-10-16).
+        if intermediate_tensors is None:
             assert hidden_states is not None
             if inputs_embeds is None:
                 assert input_ids is not None
