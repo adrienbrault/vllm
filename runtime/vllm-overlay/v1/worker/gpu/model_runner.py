@@ -19,6 +19,7 @@ instead of embedding feature-specific logic directly.
 
 import functools
 import gc
+import os
 import time
 from copy import deepcopy
 from typing import Any, NamedTuple
@@ -1523,6 +1524,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             num_active_loras=num_active_loras,
         )
 
+        ple_submitted = False
         if batch_desc.num_tokens == 0:
             # All DP ranks have zero tokens to run.
             empty_output = self.kv_connector.no_forward(scheduler_output)
@@ -1535,6 +1537,24 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             input_batch = self.prepare_inputs(
                 scheduler_output, batch_req_state, batch_desc
             )
+            # QWEN38_PLE_EARLY=1: PLE inputs (input_ids,
+            # query_start_loc, n-gram context) are final here. Hand them to the
+            # PLE CPU worker now, before the attention metadata builds, so its
+            # host round trip overlaps the rest of the prep chain on the GPU
+            # instead of starting after it.
+            prepare_ple = getattr(self.model_state, "prepare_ple_inputs", None)
+            if (
+                os.environ.get("QWEN38_PLE_EARLY") == "1"
+                and self._ple_offload_connector is not None
+                and prepare_ple is not None
+                and prepare_ple(input_batch, self.req_states)
+            ):
+                self._ple_offload_connector.prepare_forward(
+                    input_batch.num_reqs,
+                    input_batch.num_tokens_after_padding,
+                    False,
+                )
+                ple_submitted = True
             block_tables, slot_mappings = self.prepare_attn(input_batch)
             # Mamba "align" pre-copy: migrate recurrent state across block
             # boundaries before the forward. Runs only on real batches, and
@@ -1684,8 +1704,9 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         self.step_timing.forward_start()
 
         # prepare_inputs has finalized MRV2's GPU buffers. Record readiness so
-        # the request thread can stage them before the PLE placeholder runs.
-        if self._ple_offload_connector is not None:
+        # the request thread can stage them before the PLE placeholder runs
+        # (unless it was already submitted right after prepare_inputs).
+        if self._ple_offload_connector is not None and not ple_submitted:
             self._ple_offload_connector.prepare_forward(
                 input_batch.num_reqs,
                 input_batch.num_tokens_after_padding,

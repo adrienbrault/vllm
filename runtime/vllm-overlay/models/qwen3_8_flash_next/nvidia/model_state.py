@@ -94,6 +94,28 @@ class Qwen3_8FlashNextModelState(MambaHybridModelState):
         )
         return context
 
+    def prepare_ple_inputs(
+        self,
+        input_batch: InputBatch,
+        req_states: RequestState,
+    ) -> bool:
+        """Write the PLE query_start_loc / n-gram context buffers now, so the
+        runner can hand them to the PLE CPU worker before the attention
+        metadata builds. Returns False when this stage has no PLE layer.
+
+        prepare_inputs() must then reuse these tensors instead of rewriting
+        them: the PLE D2H copy on its side stream is ordered only after the
+        event recorded right after this call, and a rewrite (fill_ + copy_)
+        on the main stream could race with that read."""
+        if not self.uses_ngram_embedding:
+            return False
+        num_reqs_padded = input_batch.num_reqs_after_padding
+        query_start_loc = self.ple_query_start_loc[: num_reqs_padded + 1]
+        query_start_loc.copy_(input_batch.query_start_loc[: num_reqs_padded + 1])
+        ngram_context = self._prepare_ngram_context(input_batch, req_states)
+        self._ple_prepared = (input_batch, query_start_loc, ngram_context)
+        return True
+
     def prepare_inputs(
         self,
         input_batch: InputBatch,
@@ -103,12 +125,18 @@ class Qwen3_8FlashNextModelState(MambaHybridModelState):
         if not self.uses_ngram_embedding:
             return model_inputs
 
-        num_reqs_padded = input_batch.num_reqs_after_padding
-        query_start_loc = self.ple_query_start_loc[: num_reqs_padded + 1]
-        query_start_loc.copy_(input_batch.query_start_loc[: num_reqs_padded + 1])
+        prepared = getattr(self, "_ple_prepared", None)
+        self._ple_prepared = None
+        if prepared is not None and prepared[0] is input_batch:
+            _, query_start_loc, ngram_context = prepared
+        else:
+            num_reqs_padded = input_batch.num_reqs_after_padding
+            query_start_loc = self.ple_query_start_loc[: num_reqs_padded + 1]
+            query_start_loc.copy_(input_batch.query_start_loc[: num_reqs_padded + 1])
+            ngram_context = self._prepare_ngram_context(input_batch, req_states)
         model_inputs.update(
             query_start_loc=query_start_loc,
-            ngram_context=self._prepare_ngram_context(input_batch, req_states),
+            ngram_context=ngram_context,
         )
         return model_inputs
 
