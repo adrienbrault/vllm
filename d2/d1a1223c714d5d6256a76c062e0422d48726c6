@@ -1,0 +1,20 @@
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 50,58-59
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/ple_layer.py
+  h_c86d546d9a059f 262,290
+runtime/vllm-overlay/v1/ple_offload/fast.py
+  h_c86d546d9a059f 11-12,17-20,35,40-46,73-77,79-82,86-121,180-182,196-197,201-258,261-264,267-268
+runtime/vllm-overlay/v1/ple_offload/ple_fast.cpp
+  h_c86d546d9a059f 3-7,9-10,12,16-22,34-41,44-69,71-75,78-207,209-211,213-219,235-236,238,241-242,246-252,255,300-304,308-320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d2d1a1223c714d5d6256a76c062e0422d48726c6",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
