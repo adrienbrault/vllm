@@ -419,6 +419,230 @@ def _hc_combine_norm(
     return out, y
 
 
+# ---------------------------------------------------------------------------
+# Two-block combine variants (QWEN38_DEFER_SHARED_ADD)
+#
+# When the MoE runner defers the shared+routed add, the pending HC block
+# output is an unadded pair.  These kernels fold that add in: the pair is
+# summed in FP32 and rounded to the output dtype *first*, reproducing
+# exactly the rounding of the removed ``shared_output + fused_output``
+# elementwise kernel, then the usual combine / combine+norm math runs on
+# that rounded value bit-identically to the unfused path.
+# ---------------------------------------------------------------------------
+@triton.jit
+def _hc_combine2_kernel(
+    block_a_ptr,
+    block_b_ptr,
+    res_ptr,
+    inj_ptr,
+    out_ptr,
+    stride_block_a,
+    stride_block_b,
+    stride_res,
+    stride_inj,
+    stride_out,
+    HC_DIM: tl.constexpr,
+    HC: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr,
+    launch_pdl: tl.constexpr,
+) -> None:
+    HC_PAD: tl.constexpr = triton.next_power_of_2(HC)
+
+    row = tl.program_id(0)
+    tile_id = tl.program_id(1)
+
+    offs_inner = tile_id * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask_inner = offs_inner < HC_DIM
+    offs_hc = tl.arange(0, HC_PAD)
+    mask_hc = offs_hc < HC
+    offs = offs_hc[:, None] * HC_DIM + offs_inner[None, :]
+    mask = mask_hc[:, None] & mask_inner[None, :]
+
+    if launch_pdl:
+        tl.extra.cuda.gdc_wait()
+
+    inj = tl.load(inj_ptr + row * stride_inj + offs_hc, mask_hc, other=0.0)
+    block_a = tl.load(block_a_ptr + row * stride_block_a + offs_inner, mask_inner, other=0.0)
+    block_b = tl.load(block_b_ptr + row * stride_block_b + offs_inner, mask_inner, other=0.0)
+    res = tl.load(res_ptr + row * stride_res + offs, mask, other=0.0)
+
+    # Round the shared+routed sum before the combine, matching the removed
+    # standalone add kernel.
+    block = (block_a.to(tl.float32) + block_b.to(tl.float32)).to(
+        out_ptr.dtype.element_ty
+    )
+    inj = 2.0 * tl.sigmoid(inj.to(tl.float32) / HC)
+    out = res.to(tl.float32) + block.to(tl.float32)[None, :] * inj[:, None]
+
+    if launch_pdl:
+        tl.extra.cuda.gdc_launch_dependents()
+    tl.store(out_ptr + row * stride_out + offs, out, mask=mask)
+
+
+def _hc_combine2(
+    residual: torch.Tensor,
+    block_output_a: torch.Tensor,
+    block_output_b: torch.Tensor,
+    injection_logits: torch.Tensor,
+    hc_count: int,
+) -> torch.Tensor:
+    N, DIM = residual.shape
+    assert DIM % hc_count == 0
+    hc_dim = DIM // hc_count
+    assert block_output_a.shape == (N, hc_dim)
+    assert block_output_b.shape == (N, hc_dim)
+    assert injection_logits.shape == (N, hc_count)
+    assert residual.stride(1) == 1
+    assert block_output_a.stride(1) == 1
+    assert block_output_b.stride(1) == 1
+    assert injection_logits.stride(1) == 1
+    assert block_output_a.dtype == residual.dtype
+    assert block_output_b.dtype == residual.dtype
+
+    out = residual.new_empty(residual.shape)
+    BLOCK_SIZE = 512
+    _hc_combine2_kernel[(N, triton.cdiv(hc_dim, BLOCK_SIZE))](
+        block_output_a,
+        block_output_b,
+        residual,
+        injection_logits,
+        out,
+        block_output_a.stride(0),
+        block_output_b.stride(0),
+        residual.stride(0),
+        injection_logits.stride(0),
+        out.stride(0),
+        hc_dim,
+        hc_count,
+        BLOCK_SIZE,
+        launch_pdl=current_platform.is_arch_support_pdl(),
+    )
+    return out
+
+
+@triton.jit
+def _hc_combine_norm2_kernel(
+    block_a_ptr,
+    block_b_ptr,
+    res_ptr,
+    inj_ptr,
+    w_ptr,
+    out_ptr,
+    y_ptr,
+    stride_block_a,
+    stride_block_b,
+    stride_res,
+    stride_inj,
+    stride_out,
+    stride_y,
+    HC_DIM: tl.constexpr,
+    HC: tl.constexpr,
+    W_SHARED: tl.constexpr,
+    EPS: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr,
+    launch_pdl: tl.constexpr,
+) -> None:
+    HC_PAD: tl.constexpr = triton.next_power_of_2(HC)
+    NUM_TILES: tl.constexpr = triton.cdiv(HC_DIM, BLOCK_SIZE)
+    NUM_TILES_PAD: tl.constexpr = triton.next_power_of_2(NUM_TILES)
+
+    row = tl.program_id(0)
+    stream = tl.program_id(1)
+    offs_hc = tl.arange(0, HC_PAD)
+    mask_hc = offs_hc < HC
+    tile_ids = tl.arange(0, NUM_TILES_PAD)
+    offs_inner = tile_ids[:, None] * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)[None, :]
+    mask_inner = offs_inner < HC_DIM
+    offs = stream * HC_DIM + offs_inner
+    w_offs = offs_inner if W_SHARED else offs
+
+    if launch_pdl:
+        tl.extra.cuda.gdc_wait()
+
+    res = tl.load(res_ptr + row * stride_res + offs, mask_inner, other=0.0)
+    inj = tl.load(inj_ptr + row * stride_inj + offs_hc, mask_hc, other=0.0)
+    block_a = tl.load(
+        block_a_ptr + row * stride_block_a + offs_inner, mask_inner, other=0.0
+    )
+    block_b = tl.load(
+        block_b_ptr + row * stride_block_b + offs_inner, mask_inner, other=0.0
+    )
+    inj = 2.0 * tl.sigmoid(inj.to(tl.float32) / HC)
+    inj = tl.sum(tl.where(offs_hc == stream, inj, 0.0))
+    # Round the shared+routed sum exactly where the removed elementwise add
+    # kernel rounded it, then keep the combine rounding boundary.
+    block = (block_a.to(tl.float32) + block_b.to(tl.float32)).to(
+        out_ptr.dtype.element_ty
+    )
+    out = (res.to(tl.float32) + block.to(tl.float32) * inj).to(
+        out_ptr.dtype.element_ty
+    )
+    tl.store(out_ptr + row * stride_out + offs, out, mask=mask_inner)
+
+    out = out.to(tl.float32)
+    sum_sq = tl.sum(tl.sum(out * out, axis=1), axis=0)
+    rrms = tl.rsqrt(sum_sq / HC_DIM + EPS)
+
+    if launch_pdl:
+        tl.extra.cuda.gdc_launch_dependents()
+
+    w = tl.load(w_ptr + w_offs, mask_inner, other=0.0)
+    y = out * rrms
+    y += y * w.to(tl.float32)
+    tl.store(y_ptr + row * stride_y + offs, y, mask_inner)
+
+
+def _hc_combine_norm2(
+    residual: torch.Tensor,
+    block_output_a: torch.Tensor,
+    block_output_b: torch.Tensor,
+    injection_logits: torch.Tensor,
+    norm_weight: torch.Tensor,
+    eps: float,
+    hc_count: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    N, DIM = residual.shape
+    assert DIM % hc_count == 0
+    hc_dim = DIM // hc_count
+    assert block_output_a.shape == (N, hc_dim)
+    assert block_output_b.shape == (N, hc_dim)
+    assert injection_logits.shape == (N, hc_count)
+    assert residual.stride(1) == 1
+    assert block_output_a.stride(1) == 1
+    assert block_output_b.stride(1) == 1
+    assert injection_logits.stride(1) == 1
+    assert norm_weight.is_contiguous()
+    assert norm_weight.numel() in (hc_dim, DIM)
+    assert block_output_a.dtype == residual.dtype
+    assert block_output_b.dtype == residual.dtype
+
+    out = residual.new_empty(residual.shape)
+    y = residual.new_empty(residual.shape)
+    BLOCK_SIZE = 512
+    _hc_combine_norm2_kernel[(N, hc_count)](
+        block_output_a,
+        block_output_b,
+        residual,
+        injection_logits,
+        norm_weight,
+        out,
+        y,
+        block_output_a.stride(0),
+        block_output_b.stride(0),
+        residual.stride(0),
+        injection_logits.stride(0),
+        out.stride(0),
+        y.stride(0),
+        hc_dim,
+        hc_count,
+        W_SHARED=norm_weight.numel() == hc_dim,
+        EPS=eps,
+        BLOCK_SIZE=BLOCK_SIZE,
+        launch_pdl=current_platform.is_arch_support_pdl(),
+    )
+    return out, y
+
+
 def _same_shape_fake(x: torch.Tensor, *args) -> torch.Tensor:
     return x.new_empty(x.shape)
 
@@ -449,6 +673,30 @@ def _hc_combine_fake(
 ) -> torch.Tensor:
     del block_output, injection_logits, hc_count
     return residual.new_empty(residual.shape)
+
+
+def _hc_combine2_fake(
+    residual: torch.Tensor,
+    block_output_a: torch.Tensor,
+    block_output_b: torch.Tensor,
+    injection_logits: torch.Tensor,
+    hc_count: int,
+) -> torch.Tensor:
+    del block_output_a, block_output_b, injection_logits, hc_count
+    return residual.new_empty(residual.shape)
+
+
+def _hc_combine_norm2_fake(
+    residual: torch.Tensor,
+    block_output_a: torch.Tensor,
+    block_output_b: torch.Tensor,
+    injection_logits: torch.Tensor,
+    norm_weight: torch.Tensor,
+    eps: float,
+    hc_count: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    del block_output_a, block_output_b, injection_logits, norm_weight, eps, hc_count
+    return residual.new_empty(residual.shape), residual.new_empty(residual.shape)
 
 
 def _hc_combine_norm_fake(
@@ -492,6 +740,16 @@ direct_register_custom_op(
     op_name="qwen3_8_flash_next_hc_combine_norm",
     op_func=_hc_combine_norm,
     fake_impl=_hc_combine_norm_fake,
+)
+direct_register_custom_op(
+    op_name="qwen3_8_flash_next_hc_combine2",
+    op_func=_hc_combine2,
+    fake_impl=_hc_combine2_fake,
+)
+direct_register_custom_op(
+    op_name="qwen3_8_flash_next_hc_combine_norm2",
+    op_func=_hc_combine_norm2,
+    fake_impl=_hc_combine_norm2_fake,
 )
 
 
@@ -552,10 +810,46 @@ def hc_combine_norm(
     )
 
 
+def hc_combine2(
+    residual: torch.Tensor,
+    block_output_pair: tuple[torch.Tensor, torch.Tensor],
+    injection_logits: torch.Tensor,
+    hc_count: int,
+) -> torch.Tensor:
+    return torch.ops.vllm.qwen3_8_flash_next_hc_combine2(
+        residual,
+        block_output_pair[0],
+        block_output_pair[1],
+        injection_logits,
+        hc_count,
+    )
+
+
+def hc_combine_norm2(
+    residual: torch.Tensor,
+    block_output_pair: tuple[torch.Tensor, torch.Tensor],
+    injection_logits: torch.Tensor,
+    norm_weight: torch.Tensor,
+    eps: float,
+    hc_count: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return torch.ops.vllm.qwen3_8_flash_next_hc_combine_norm2(
+        residual,
+        block_output_pair[0],
+        block_output_pair[1],
+        injection_logits,
+        norm_weight,
+        eps,
+        hc_count,
+    )
+
+
 __all__ = [
     "grouped_gemma_rmsnorm",
     "hc_combine",
+    "hc_combine2",
     "hc_combine_norm",
+    "hc_combine_norm2",
     "hc_gate_mix",
     "hc_project_gate_mix",
     "hc_silu",

@@ -38,7 +38,9 @@ from ..common.hyperconnection import (
 from .ops.hc import (
     grouped_gemma_rmsnorm,
     hc_combine,
+    hc_combine2,
     hc_combine_norm,
+    hc_combine_norm2,
     hc_gate_mix,
     hc_project_gate_mix,
     hc_silu,
@@ -157,16 +159,24 @@ class GatedResidual(nn.Module):
     def combine_and_mix(
         self,
         hidden_states: torch.Tensor,
-        prev_block_output: torch.Tensor,
+        prev_block_output: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
         prev_injection: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """Consume a pending combine, then prepare the next block input.
 
         ``hidden_states`` is the multi-stream state from before the pending
         block's mix. Its combine with ``block_output`` is fused with this
-        module's input RMSNorm.
+        module's input RMSNorm. ``prev_block_output`` may be an unadded
+        ``(shared, routed)`` pair when ``QWEN38_DEFER_SHARED_ADD`` deferred
+        the MoE output add; the combine kernel folds it in with identical
+        rounding.
         """
-        hidden_states, xn = hc_combine_norm(
+        combine_norm = (
+            hc_combine_norm2
+            if isinstance(prev_block_output, tuple)
+            else hc_combine_norm
+        )
+        hidden_states, xn = combine_norm(
             hidden_states,
             prev_block_output,
             prev_injection,
@@ -197,9 +207,13 @@ class GatedResidual(nn.Module):
     def combine(
         self,
         hidden_states: torch.Tensor,
-        block_output: torch.Tensor,
+        block_output: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
         injection: torch.Tensor,
     ) -> torch.Tensor:
+        if isinstance(block_output, tuple):
+            return hc_combine2(
+                hidden_states, block_output, injection, self.hc_count
+            )
         return hc_combine(hidden_states, block_output, injection, self.hc_count)
 
     @property

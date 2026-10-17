@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import ClassVar, cast
 
 import torch
@@ -55,6 +56,13 @@ from vllm.v1.kv_cache_interface import (
 from ..common.qsa_cache import QSAForwardMetadata
 from . import model
 from .indexer_qsa import QSAIndexer
+
+# QWEN38_FUSE_QSA_ZEROFILL (default off): the sparse-attention kernels write
+# zeros to graph-capture padding rows themselves instead of a separate
+# output.zero_() fill.  Byte-identical output either way: the kernels already
+# overwrite every valid row, and padding rows held exactly the zeros the fill
+# left behind.
+_QWEN38_FUSE_QSA_ZEROFILL = os.environ.get("QWEN38_FUSE_QSA_ZEROFILL", "0") == "1"
 
 
 class Qwen3_8FlashNextQSAMetadataBuilder(FlashAttentionMetadataBuilder):
@@ -180,9 +188,26 @@ class Qwen3_8FlashNextQSAFlashAttentionImpl(FlashAttentionImpl):
             raise NotImplementedError("QSA does not support sliding-window attention")
 
         num_tokens = attn_metadata.num_actual_tokens
-        output.zero_()
-        if num_tokens == 0:
-            return output
+        # When the zero-fill fusion opts in and query/output carry the
+        # graph-capture padding rows, the attention kernels write zeros to the
+        # rows beyond num_tokens themselves and the standalone fill is
+        # skipped.  Byte-identical either way: valid rows are fully overwritten
+        # by the kernels, padding rows held exactly the zeros the fill left.
+        fuse_zero = (
+            _QWEN38_FUSE_QSA_ZEROFILL
+            and query.shape[0] == output.shape[0]
+            and num_tokens <= query.shape[0]
+        )
+        if fuse_zero:
+            if not query.shape[0] or num_tokens == 0:
+                # Empty Q or a fully padded batch: the kernel would only write
+                # zeros; the fill is equivalent and needs no metadata.
+                output.zero_()
+                return output
+        else:
+            output.zero_()
+            if num_tokens == 0:
+                return output
 
         topk_buffer = getattr(layer, "topk_indices_buffer", None)
         if topk_buffer is None:
@@ -202,15 +227,16 @@ class Qwen3_8FlashNextQSAFlashAttentionImpl(FlashAttentionImpl):
         from .ops.qsa import qsa_sparse_paged_attention
 
         qsa_sparse_paged_attention(
-            query[:num_tokens],
+            query if fuse_zero else query[:num_tokens],
             key_cache,
             value_cache,
             logical_indices,
             attn_metadata.block_table,
             token_to_req,
-            output[:num_tokens],
+            output if fuse_zero else output[:num_tokens],
             k_scale=k_scale,
             v_scale=v_scale,
+            num_valid_rows=num_tokens if fuse_zero else None,
         )
         return output
 
@@ -501,7 +527,13 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             )
         flat_output = attn_output.view(num_tokens, -1)
         if gate is not None:
-            flat_output = flat_output * torch.sigmoid(gate)
+            # QWEN38_FUSE_SIGMOID_MUL: one Triton kernel instead of the
+            # sigmoid + mul kernel pair (identical two-step BF16 rounding).
+            from vllm.model_executor.layers.fused_moe.qwen38_fusions import (
+                maybe_sigmoid_mul,
+            )
+
+            flat_output = maybe_sigmoid_mul(flat_output, gate)
         output, _ = self.o_proj(flat_output)
         return output
 

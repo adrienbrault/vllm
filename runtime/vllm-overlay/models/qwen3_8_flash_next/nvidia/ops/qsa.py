@@ -270,6 +270,7 @@ def _qsa_sparse_paged_gqa_splitk_kernel(
     num_rows,
     num_cache_blocks,
     num_requests,
+    num_valid_rows,
     QUANT: tl.constexpr,
     TOPK: tl.constexpr,
     PAGE_SIZE: tl.constexpr,
@@ -285,13 +286,31 @@ def _qsa_sparse_paged_gqa_splitk_kernel(
     row = tl.program_id(0)
     kv_head = tl.program_id(1)
     split_id = tl.program_id(2)
-    request = tl.load(token_to_req_ptr + row)
-    safe_request = tl.minimum(tl.maximum(request, 0), num_requests - 1)
 
     head_offsets = tl.arange(0, BLOCK_M)
     dim_offsets = tl.arange(0, HEAD_DIM)
     column_offsets = tl.arange(0, BLOCK_N)
     first_head = kv_head * GROUP_SIZE
+
+    # Rows at or beyond num_valid_rows are graph-capture padding: write the
+    # same zeros the standalone output.zero_() would have left (flagged-off
+    # launches always pass num_valid_rows == num_rows, so this never fires).
+    if row >= num_valid_rows:
+        if NUM_SPLITS == 1:
+            tl.store(
+                output_ptr
+                + row * stride_output_row
+                + (first_head + head_offsets[:, None]) * stride_output_head
+                + dim_offsets[None, :],
+                tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32).to(
+                    output_ptr.dtype.element_ty
+                ),
+                mask=head_offsets[:, None] < GROUP_SIZE,
+            )
+        return
+
+    request = tl.load(token_to_req_ptr + row)
+    safe_request = tl.minimum(tl.maximum(request, 0), num_requests - 1)
     query = tl.load(
         q_ptr
         + row * stride_q_row
@@ -453,6 +472,7 @@ def _qsa_merge_splitk_kernel(
     stride_output_row,
     stride_output_head,
     num_rows,
+    num_valid_rows,
     HEAD_DIM: tl.constexpr,
     NUM_QUERY_HEADS: tl.constexpr,
     NUM_SPLITS: tl.constexpr,
@@ -462,6 +482,15 @@ def _qsa_merge_splitk_kernel(
     head = tl.program_id(1)
     split_offsets = tl.arange(0, BLOCK_SPLITS)
     dim_offsets = tl.arange(0, HEAD_DIM)
+    # Padding rows beyond num_valid_rows (graph-capture padding, only when
+    # the zero-fill-fusion flag opts into it) get the zeros the removed
+    # output.zero_() would have left; their partials were never written.
+    if row >= num_valid_rows:
+        tl.store(
+            output_ptr + row * stride_output_row + head * stride_output_head + dim_offsets,
+            tl.zeros([HEAD_DIM], dtype=tl.float32).to(output_ptr.dtype.element_ty),
+        )
+        return
     split_mask = split_offsets < NUM_SPLITS
     lse = tl.load(
         partial_lse_ptr + (split_offsets * num_rows + row) * NUM_QUERY_HEADS + head,
@@ -929,17 +958,28 @@ def qsa_sparse_paged_attention(
     out: torch.Tensor | None = None,
     k_scale: torch.Tensor | None = None,
     v_scale: torch.Tensor | None = None,
+    num_valid_rows: int | None = None,
 ) -> torch.Tensor:
     """Run sparse GQA directly over paged BF16 K/V caches, or int8/fp8 caches with per-(token, head)
-    float32 scales k_scale/v_scale shaped [num_blocks, block_size, num_kv_heads]."""
+    float32 scales k_scale/v_scale shaped [num_blocks, block_size, num_kv_heads].
+
+    ``num_valid_rows`` (opt-in, default None = every row is valid) lets the
+    caller pass padding-inclusive ``q``/``out`` row counts: rows at or beyond
+    it are written as zeros by the attention kernels themselves, replacing a
+    standalone ``out.zero_()``.  Tile/split configuration still comes from the
+    valid row count so valid-row results are unchanged."""
 
     if not q.is_cuda or not HAS_TRITON:
         raise RuntimeError("paged QSA sparse attention requires CUDA and Triton")
+    if num_valid_rows is None:
+        num_valid_rows = q.shape[0]
+    if not (0 <= num_valid_rows <= q.shape[0]):
+        raise ValueError("QSA sparse attention received an invalid valid row count")
     if q.ndim != 3 or k_cache.ndim != 4 or v_cache.shape != k_cache.shape:
         raise ValueError("QSA sparse attention received invalid Q/K/V shapes")
-    if logical_indices.ndim != 2 or logical_indices.shape[0] != q.shape[0]:
+    if logical_indices.ndim != 2 or logical_indices.shape[0] != num_valid_rows:
         raise ValueError("QSA indices must have one row per query")
-    if token_to_req.shape != (q.shape[0],) or block_table.ndim != 2:
+    if token_to_req.shape != (num_valid_rows,) or block_table.ndim != 2:
         raise ValueError("QSA sparse attention metadata has invalid shapes")
     if not all(k_cache.shape[:3]) or not all(block_table.shape):
         raise ValueError("QSA sparse attention cache and block table must be nonempty")
@@ -976,7 +1016,9 @@ def qsa_sparse_paged_attention(
 
     group_size = q.shape[1] // k_cache.shape[2]
     block_m = triton.next_power_of_2(group_size)
-    base_programs = q.shape[0] * k_cache.shape[2]
+    # Configuration depends only on valid rows: identical numerics and tuning
+    # for them whether or not padding rows ride along in q/out.
+    base_programs = num_valid_rows * k_cache.shape[2]
     small_profile_limit = 8 if block_m <= 8 else 4
 
     # Tuned on GB300 for the Qwen-Air TP1, TP2, and TP4 attention shapes.
@@ -1044,6 +1086,7 @@ def qsa_sparse_paged_attention(
         q.shape[0],
         k_cache.shape[0],
         block_table.shape[0],
+        num_valid_rows,
         QUANT=quant,
         TOPK=logical_indices.shape[1],
         PAGE_SIZE=k_cache.shape[1],
@@ -1068,6 +1111,7 @@ def qsa_sparse_paged_attention(
         out.stride(0),
         out.stride(1),
         q.shape[0],
+        num_valid_rows,
         HEAD_DIM=q.shape[2],
         NUM_QUERY_HEADS=q.shape[1],
         NUM_SPLITS=num_splits,

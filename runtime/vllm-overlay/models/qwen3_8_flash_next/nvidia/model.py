@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Inference-only Qwen3.8-Flash-Next model."""
 
+import os
 from collections.abc import Iterable
 from itertools import islice
 
@@ -170,6 +171,44 @@ class Qwen3_8FlashNextSparseMoeBlock(Qwen3NextSparseMoeBlock):
         config = vllm_config.model_config.hf_text_config
         self.n_shared_experts = int(config.shared_expert_intermediate_size > 0)
 
+        # QWEN38_DEFER_SHARED_ADD (default off): the runner returns the
+        # shared/routed outputs unadded; the next HC combine kernel folds the
+        # add in with identical rounding, removing one [T, hidden] elementwise
+        # kernel per MoE block per step.  Not compatible with abliteration
+        # (which projects the *materialized* routed+shared sum in place).
+        defer = (
+            os.environ.get("QWEN38_DEFER_SHARED_ADD", "0") == "1"
+            and self.shared_expert is not None
+        )
+        if defer and abliteration.direction_path() is not None:
+            defer = False  # see comment above
+        self._qwen38_defer_add = defer
+        if defer:
+            self.experts._qwen38_defer_add_ok = True
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        already_sequence_parallel: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        if not self._qwen38_defer_add:
+            return super().forward(hidden_states, already_sequence_parallel)
+        orig_shape = hidden_states.shape
+        num_tokens, hidden_dim = hidden_states.shape
+        hidden_states = hidden_states.view(-1, hidden_dim)
+        # The runner returns (shared_output, routed_output) when the deferred
+        # preconditions hold and the plain combined tensor otherwise.
+        result = self.experts(
+            hidden_states=hidden_states, router_logits=hidden_states
+        )
+        if isinstance(result, tuple):
+            shared, routed = result
+            return (
+                shared.view(orig_shape),
+                routed.view(orig_shape),
+            )
+        return result.view(orig_shape)
+
 
 class Qwen3_8FlashNextDecoderLayer(nn.Module):
     def __init__(
@@ -285,14 +324,16 @@ class Qwen3_8FlashNextDecoderLayer(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        prev_block_output: torch.Tensor | None,
+        prev_block_output: torch.Tensor
+        | tuple[torch.Tensor, torch.Tensor]
+        | None,
         prev_injection: torch.Tensor | None,
         positions: torch.Tensor,
         *,
         input_ids: torch.Tensor | None,
         query_start_loc: torch.Tensor | None,
         ngram_context: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor | tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         attn_hc = self.attn_hyper_connection
         if self.ple is not None:
             # PLE adds directly to the multi-stream state, so pending HC state
@@ -336,7 +377,13 @@ class Qwen3_8FlashNextDecoderLayer(nn.Module):
             hidden_states, attn_out, injection
         )
         mlp_out = self.mlp(block_input)
-        abliteration.project_(mlp_out, self._abliteration_r)
+        if isinstance(mlp_out, tuple):
+            # QWEN38_DEFER_SHARED_ADD: (shared, routed) pair; abliteration is
+            # force-disabled for deferral at Qwen3_8FlashNextSparseMoeBlock
+            # init, so nothing projects here.
+            assert self._abliteration_r is None
+        else:
+            abliteration.project_(mlp_out, self._abliteration_r)
         return hidden_states, mlp_out, injection
 
 

@@ -34,6 +34,12 @@ from vllm.model_executor.layers.fused_moe.router.router_factory import (
 from vllm.model_executor.layers.fused_moe.runner.moe_runner import (
     MoERunner,
 )
+
+# Qwen3.8-Flash-Next decode fusions module.  Imported for its side effect:
+# it registers the sigmoid-mul custom op.
+from vllm.model_executor.layers.fused_moe import (  # noqa: E402
+    qwen38_fusions as _qwen38_fusions,
+)
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig,
 )
