@@ -1,0 +1,44 @@
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 2,5,11,40-42,45-46,48-53,57,59
+runtime/vllm-overlay/model_executor/layers/fused_moe/experts/fused_humming_moe.py
+  h_c86d546d9a059f 7,78,580-604,639-651,770-775
+runtime/vllm-overlay/model_executor/layers/fused_moe/moe_decode.py
+  h_c86d546d9a059f 1-114
+runtime/vllm-overlay/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py
+  h_c86d546d9a059f 910-918
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/draft_vocab.py
+  h_c86d546d9a059f 10-13,49-53,57
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/gluon_thin.py
+  h_c86d546d9a059f 1-138
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/gluon_thin_table.py
+  h_c86d546d9a059f 1-157
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/low_latency_gemm.py
+  h_c86d546d9a059f 130-132,137-142,179,230-309
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/model.py
+  h_c86d546d9a059f 82-84,915-917,1110-1112
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/morrow/LICENSE
+  h_c86d546d9a059f 1-201
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/morrow/NOTICE
+  h_c86d546d9a059f 1-4
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/morrow/thin_gemm_gluon.py
+  h_c86d546d9a059f 1-970
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/mtp.py
+  h_c86d546d9a059f 52-54,489-491
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/ops/hc.py
+  h_c86d546d9a059f 3-4,216-222
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/ple_layer.py
+  h_c86d546d9a059f 1444-1450
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/triton_skinny.py
+  h_c86d546d9a059f 2,9,14-17,38-39,66-87,90-223,247-281,284-287,290,292-300,302,304-337
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "74d97d2f5182dd15a8557bc44b12694a01d6527a",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
