@@ -1,0 +1,24 @@
+docker/Dockerfile
+  h_c86d546d9a059f 9-12
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 50,58-59,61
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/ple_layer.py
+  h_c86d546d9a059f 567-576
+runtime/vllm-overlay/v1/ple_offload/fast.py
+  h_c86d546d9a059f 1-145
+runtime/vllm-overlay/v1/ple_offload/ple_fast.cpp
+  h_c86d546d9a059f 1-119
+runtime/vllm-overlay/v1/ple_offload/worker.py
+  h_c86d546d9a059f 406,648-654,714-719,726-729
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b0d42bc46313a0de49d62591a4292d0b2c8dad6d",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
