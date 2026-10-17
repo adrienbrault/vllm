@@ -1,0 +1,32 @@
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 4,6,9,32,40,43,46-47,51
+runtime/vllm-overlay/model_executor/layers/fused_moe/layer.py
+  h_c86d546d9a059f 37-42
+runtime/vllm-overlay/model_executor/layers/fused_moe/qwen38_fusions.py
+  h_c86d546d9a059f 1-125
+runtime/vllm-overlay/model_executor/layers/fused_moe/runner/moe_runner.py
+  h_c86d546d9a059f 1-1022
+runtime/vllm-overlay/model_executor/models/qwen2_moe.py
+  h_c86d546d9a059f 1-512
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/hyperconnection.py
+  h_c86d546d9a059f 41,43,162,169-172,174-179,210,213-216
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/model.py
+  h_c86d546d9a059f 5,174-211,327-329,336,380-386
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/ops/hc.py
+  h_c86d546d9a059f 422-645,678-701,744-753,813-846,850,852
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/ops/qsa.py
+  h_c86d546d9a059f 273,294-313,475,485-493,961,964-970,974-977,980,982,1019-1021,1089,1114
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/qsa.py
+  h_c86d546d9a059f 7,60-66,191-210,230,236,239,530-536
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "06bcf288d5b3e3625fd78da1a069212b2ed0623e",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
