@@ -19,6 +19,9 @@ RUN MAX_JOBS=2 python3 -c 'from vllm.model_executor.layers.quantization.compress
 COPY configs/2x3090-128gb.env /opt/qwen38/configs/2x3090-128gb.env
 COPY configs/abliteration /opt/qwen38/abliteration
 COPY configs/static_hot_cache_rankings.json /workspace/static_hot_cache_rankings.json
+# CMP 170HX port: append the unranked experts so QWEN38_HOT_ONLY can cover all 512 (64 GB cards)
+COPY scripts/complete_rankings.py /opt/qwen38/scripts/complete_rankings.py
+RUN python3 /opt/qwen38/scripts/complete_rankings.py /workspace/static_hot_cache_rankings.json 512
 COPY scripts/serve-container.sh /usr/local/bin/qwen38-serve
 COPY scripts/check_custom_all_reduce.py /opt/qwen38/scripts/check_custom_all_reduce.py
 COPY tests/test_qsa_exact_topk_cpu.py /opt/qwen38/tests/test_qsa_exact_topk_cpu.py
