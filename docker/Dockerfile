@@ -6,6 +6,10 @@ COPY runtime/install_overlay.py /opt/qwen38/runtime/install_overlay.py
 COPY runtime/vllm-overlay /opt/qwen38/runtime/vllm-overlay
 RUN python3 /opt/qwen38/runtime/install_overlay.py /opt/qwen38/runtime/vllm-overlay
 
+# FP8 PLE decode uses a plain C ABI library. Build once; QWEN38_PLE_FAST is
+# default-off, and enabling it never compiles anything in the serving worker.
+RUN python3 -c 'from vllm.v1.ple_offload.fast import build_library; build_library()'
+
 # Exact-size pinned expert backing (used by tiered prefill). Build its small
 # C++ host-allocator extension now so serving never compiles it at startup.
 ENV MAX_JOBS=1 VLLM_EXACT_PINNED_WEIGHTS=1

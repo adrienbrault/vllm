@@ -564,6 +564,16 @@ class Qwen3_8FlashNextNGramEmbedding(PleOffloadLayer):
             return output
         return self.ngram_embedding(ngram_ids).flatten(-2)
 
+    def bind_decode_fast(self, inputs, targets, clamp_inputs: bool):
+        """Bind the opt-in CPU worker path after weights and IPC registration."""
+        if self.ngram_embedding.weight.dtype != torch.float8_e4m3fn:
+            return None
+        from vllm.v1.ple_offload.fast import BoundDecode
+
+        return BoundDecode(
+            self, inputs, targets, clamp_inputs, envs.VLLM_PLE_OFFLOAD_READY_TIMEOUT
+        )
+
     def get_offload_output_dtype(self, default_dtype: torch.dtype) -> torch.dtype:
         """Keep quantized lookup results in their embedding storage dtype."""
         embedding = getattr(self, "ngram_embedding", None)

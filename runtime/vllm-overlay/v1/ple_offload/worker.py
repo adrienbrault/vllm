@@ -403,6 +403,7 @@ class PleOffloadRunner:
         self._worker_targets: dict[int, dict[str, list[PleOffloadOutputTarget]]] = {}
         # Shared-memory inputs are registered once per DP rank by TP rank zero.
         self._input_bufs: dict[int, PleOffloadInputBuffers] = {}
+        self._decode_fast: dict[tuple[int, str], Any] = {}
         self._load_weights()
 
     @property
@@ -644,6 +645,13 @@ class PleOffloadRunner:
                         f"{len(targets)} targets, expected {tp_size}"
                     )
                 targets.sort(key=lambda target: target.tp_rank)
+                if os.environ.get("QWEN38_PLE_FAST") == "1":
+                    bind = getattr(self._layers[layer_name], "bind_decode_fast", None)
+                    if bind is not None:
+                        fast = bind(self._input_bufs[dp_rank], targets,
+                                    self._clamp_input_ids)
+                        if fast is not None:
+                            self._decode_fast[dp_rank, layer_name] = fast
         logger.info(
             "Registrations complete (dp_size=%d, tp_size=%d, layers=%s).",
             dp_size,
@@ -703,12 +711,22 @@ class PleOffloadRunner:
         # input once before all PLE layers consume the shared buffer.
         if self._clamp_input_ids:
             for dp_rank, request in requests_by_dp.items():
+                # The native path clamps IDs as it reads them. If any layer
+                # falls back, keep the original shared-input normalization.
+                if (request.num_tokens <= 64 and all(
+                    (dp_rank, name) in self._decode_fast for name in self._layers
+                )):
+                    continue
                 self._input_bufs[dp_rank].input_ids_buf[
                     : request.num_tokens
                 ].clamp_min_(0)
 
         for layer_name, layer in self._layers.items():
             for dp_rank, request in requests_by_dp.items():
+                fast = self._decode_fast.get((dp_rank, layer_name))
+                if fast is not None and request.num_tokens <= 64:
+                    fast.run(request.num_tokens, request.num_reqs)
+                    continue
                 targets = self._worker_targets[dp_rank][layer_name]
 
                 # The captured GPU stream sets consumed=1 only after H2D has
