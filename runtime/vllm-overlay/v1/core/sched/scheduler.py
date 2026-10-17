@@ -332,6 +332,12 @@ class Scheduler(SchedulerInterface):
         self.need_mamba_block_aligned_split = (
             self.has_mamba_layers and self.cache_config.mamba_cache_mode == "align"
         )
+        # CMP 170HX port: QWEN38_PREFILL_CHUNKS=K (default 0 = off) splits each prompt's
+        # prefill into about K chunks, so pipeline stages overlap on one prompt.
+        self._qwen38_prefill_chunks = int(os.environ.get("QWEN38_PREFILL_CHUNKS", "0"))
+        self._qwen38_prefill_chunk_min = int(
+            os.environ.get("QWEN38_PREFILL_CHUNK_MIN", str(self.block_size))
+        )
         # A finer prefix_match_unit is configured: a mamba partial tail entry
         # can only be registered by a step ending exactly at the prompt's last
         # hash boundary, so the split adds that stop.
@@ -378,6 +384,34 @@ class Scheduler(SchedulerInterface):
         # In-flight requests still prefilling (prefill chunks + in-progress
         # async KV loads). Their remaining-block reservation gates async loads.
         self._inflight_prefills: set[Request] = set()
+
+    def _qwen38_prefill_chunk_cap(
+        self, request: Request, num_new_tokens: int, num_computed_tokens: int
+    ) -> int:
+        """CMP 170HX port: cap a prefill chunk at the request's chunk size.
+
+        With pipeline parallelism one prompt only keeps both stages busy if it
+        has several chunks (stage 0 runs chunk i+1 while stage 1 runs chunk i);
+        at max_num_batched_tokens 8192 an 8k prompt is one chunk. Small chunks
+        cost per-chunk overhead on long prompts, so the size is chosen per
+        prompt: the uncached prompt tokens / QWEN38_PREFILL_CHUNKS, rounded up
+        to the scheduler block (the mamba "align" split rounds chunk ends down
+        to it), at least QWEN38_PREFILL_CHUNK_MIN. Fixed when the prompt starts,
+        so later chunks do not shrink.
+        """
+        if (
+            self._qwen38_prefill_chunks <= 0
+            or num_computed_tokens >= request.num_prompt_tokens
+        ):
+            return num_new_tokens
+        cap = getattr(request, "_qwen38_chunk_cap", None)
+        if cap is None:
+            remaining = request.num_prompt_tokens - num_computed_tokens
+            per_chunk = -(-remaining // self._qwen38_prefill_chunks)
+            cap = -(-per_chunk // self.block_size) * self.block_size
+            cap = max(cap, self._qwen38_prefill_chunk_min)
+            request._qwen38_chunk_cap = cap
+        return min(num_new_tokens, cap)
 
     def _mamba_block_aligned_split(
         self,
@@ -578,6 +612,9 @@ class Scheduler(SchedulerInterface):
             )
             if 0 < self.scheduler_config.long_prefill_token_threshold < num_new_tokens:
                 num_new_tokens = self.scheduler_config.long_prefill_token_threshold
+            num_new_tokens = self._qwen38_prefill_chunk_cap(
+                request, num_new_tokens, request.num_computed_tokens
+            )
             num_new_tokens = min(
                 num_new_tokens, token_budget, input_budget - draft_slots
             )
@@ -968,6 +1005,9 @@ class Scheduler(SchedulerInterface):
                     threshold = self.scheduler_config.long_prefill_token_threshold
                     if 0 < threshold < num_new_tokens:
                         num_new_tokens = threshold
+                    num_new_tokens = self._qwen38_prefill_chunk_cap(
+                        request, num_new_tokens, num_computed_tokens
+                    )
 
                     # chunked prefill has to be enabled explicitly to allow
                     # pooling requests to be chunked
