@@ -116,8 +116,8 @@ class PleOffloadConnector:
         self._validate_input_sources()
 
         self._pinned_host_buffers: list[torch.Tensor] = []
-        # PLE rejects DBO, and each forward consumes its output before the
-        # next launch, so one pending request is sufficient.
+        # PLE rejects DBO; one pending request plus the one being staged. With pipeline parallelism more batches
+        # can be in flight, and _launch blocks on this queue rather than failing.
         self._request_queue: queue.Queue[PleOffloadRequest | None] = queue.Queue(
             maxsize=1
         )
@@ -455,7 +455,15 @@ class PleOffloadConnector:
             num_reqs=num_reqs,
         )
         if self.tp_rank == 0:
-            self._request_queue.put_nowait(request)
+            # the CMP 170HX rig (PP=2, several sequences): the pipeline keeps more than one batch in flight, so the model
+            # thread can launch a third batch while the request thread still waits on the first one's D2H (it waits
+            # for the GPU stream, which waits for the PLE output). put_nowait then raised queue.Full and stage 0 lost
+            # the batch. Block instead: the thread drains as the GPU catches up. Inputs stay safe: each D2H copy waits
+            # on an event recorded after the previous forward, which already consumed its PLE output.
+            try:
+                self._request_queue.put(request, timeout=envs.VLLM_PLE_OFFLOAD_READY_TIMEOUT)
+            except queue.Full:
+                raise TimeoutError("Timed out queueing a PLE request") from None
 
         if not getattr(self, "_qwen38_stale_ready_possible", True):
             return
