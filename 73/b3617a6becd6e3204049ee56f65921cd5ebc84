@@ -1,0 +1,20 @@
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 58-59
+runtime/vllm-overlay/v1/worker/gpu/model_runner.py
+  h_c86d546d9a059f 1003-1005,1927-1931
+runtime/vllm-overlay/v1/worker/gpu/pp_utils.py
+  h_c86d546d9a059f 1-251
+scripts/serve-container.sh
+  h_c86d546d9a059f 112-117,150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "73b3617a6becd6e3204049ee56f65921cd5ebc84",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
