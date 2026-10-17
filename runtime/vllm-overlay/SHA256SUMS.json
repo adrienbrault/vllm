@@ -58,6 +58,7 @@
   "models/qwen3_8_flash_next/nvidia/qsa.py": "b9c4dec645f38a2f51d65b7726bcb27105dd7425ee87894bfa784f087725898c",
   "models/qwen3_8_flash_next/nvidia/triton_skinny.py": "36c7e3ad8f59cb4311b3f6a8a6658d70c5e4dda3abc0057ea99fc57b63521027",
   "qwen38_host.py": "b9e167dd9679b8ef1ce48a16a74ddec3f6b9e35d0d1079e327cb3bde09e33345",
+  "v1/attention/backends/gdn_attn.py": "826c9dbcce706832c966fd75e7e7fcdf45e307ca94794371c953f84c02183bf1",
   "v1/attention/backends/short_conv_attn.py": "5364d471335696e88aa258b47fcd6f686b261356ba8ddf6da6fa3e26e3783d8a",
   "v1/core/sched/scheduler.py": "72c714ef01b3a0ed3ffd135b15cea0554eab4e17c228ce1d399504c097968867",
   "v1/core/single_type_kv_cache_manager.py": "ff96edcb5920b88909ce8847d731802b7b52c906dff9fd74e2bdac7d8e8fdd28",
