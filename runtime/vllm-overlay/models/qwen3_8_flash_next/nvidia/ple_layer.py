@@ -259,6 +259,7 @@ class _PleMmapTable:
         self.head_dim = head_dim
         self.page = mmap.PAGESIZE
         self._maps, self.views, self.bases, self.map_of = {}, [], [], []
+        self.paths = []  # native fast reader opens these only under its opt-in flag
         for shard in range(num_shards):
             name, rel = names[shard]
             path = os.path.join(model_dir, rel)
@@ -286,6 +287,7 @@ class _PleMmapTable:
             self.views.append(view.view(rows, head_dim))
             self.bases.append(data_start + start)
             self.map_of.append(mm)
+            self.paths.append(path)
         self.num_shards = num_shards
         self._bounds = torch.arange(num_shards + 1, dtype=torch.int64)
 
