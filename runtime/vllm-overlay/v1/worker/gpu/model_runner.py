@@ -63,6 +63,7 @@ from vllm.utils.math_utils import cdiv
 from vllm.utils.mem_utils import DeviceMemoryProfiler, format_gib
 from vllm.utils.torch_utils import STR_DTYPE_TO_TORCH_DTYPE
 from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
+from vllm.v1.spec_decode.dynamic.mtp_graphs import dynamic_mtp_graphs_enabled
 from vllm.v1.kv_cache_interface import (
     CircularBufferSpec,
     KVCacheConfig,
@@ -243,11 +244,18 @@ class GPUModelRunner(LoRAModelRunnerMixin):
 
         # Speculative decoding.
         self.speculator = None
+        self.dynamic_mtp_graphs = dynamic_mtp_graphs_enabled(vllm_config)
         self.use_aux_hidden_state_outputs = False
         self.num_speculative_steps = vllm_config.num_speculative_tokens
         if self.speculative_config is not None:
             if self.is_last_pp_rank:
-                self.speculator = init_speculator(self.vllm_config, self.device)
+                if self.dynamic_mtp_graphs:
+                    from vllm.v1.worker.gpu.spec_decode.mtp.scheduled import (
+                        ScheduledMTPSpeculator,
+                    )
+                    self.speculator = ScheduledMTPSpeculator(self.vllm_config, self.device)
+                else:
+                    self.speculator = init_speculator(self.vllm_config, self.device)
 
             if self.speculative_config.method in ("eagle3", "dflash", "dspark"):
                 # Drafting may require auxiliary hidden states from target model outputs
@@ -301,6 +309,10 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                 num_speculative_steps=self.num_speculative_steps,
                 device=self.device,
             )
+            if self.dynamic_mtp_graphs:
+                logger.info("[dynamic-mtp] PP transport sampled_width=%d draft_width=%d",
+                            self.pp_handler.max_sample_len,
+                            self.pp_handler.num_speculative_steps)
 
         # Samplers and decode_query_len created in load_model() after
         # model_state exists (num_new_sampled_tokens_per_step from ModelState).
@@ -1788,6 +1800,10 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             finished_req_ids=finished_req_ids,
             ec_connector_output=ec_connector_output,
             routed_experts=routed_experts,
+            # Hand-built startup warmups leave the budget at its default 0.
+            num_spec_tokens_to_schedule=(
+                scheduler_output.num_spec_tokens_to_schedule or self.num_speculative_steps
+            ),
         )
 
         if not self.is_last_pp_rank:
@@ -1812,6 +1828,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         finished_req_ids = self.execute_model_state.finished_req_ids
         ec_connector_output = self.execute_model_state.ec_connector_output
         routed_experts = self.execute_model_state.routed_experts
+        num_spec_tokens_to_schedule = self.execute_model_state.num_spec_tokens_to_schedule
         self.execute_model_state = None
 
         if not self.is_last_pp_rank:
@@ -1909,6 +1926,10 @@ class GPUModelRunner(LoRAModelRunnerMixin):
 
         if self.speculator is not None:
             assert self.sampler is not None
+            if self.dynamic_mtp_graphs:
+                # This is the NEXT proposal depth, carried with this exact
+                # execute/sample pair; current verification can have another K.
+                self.speculator.num_draft_tokens = num_spec_tokens_to_schedule
             # Let the target override the hidden state fed to the drafter
             # (e.g. DeepSeek V4 MTP needs the pre-hc_head residual). The
             # target returns a persistent buffer sized at max_num_batched_tokens;
@@ -2087,6 +2108,7 @@ class ExecuteModelState(NamedTuple):
     finished_req_ids: set[str]
     ec_connector_output: ECConnectorOutput | None
     routed_experts: RoutedExpertsTensors | None
+    num_spec_tokens_to_schedule: int = 0
 
 
 class BatchReqState(NamedTuple):

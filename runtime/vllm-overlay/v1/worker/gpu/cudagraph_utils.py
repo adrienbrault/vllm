@@ -30,6 +30,7 @@ from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.utils.math_utils import round_up
 from vllm.v1.kv_cache_interface import KVCacheConfig
+from vllm.v1.spec_decode.dynamic.mtp_graphs import dynamic_mtp_graphs_enabled
 from vllm.v1.worker.gpu.attn_utils import build_slot_mappings_by_layer
 from vllm.v1.worker.gpu.block_table import BlockTables
 from vllm.v1.worker.gpu.cp_utils import prepare_dcp_local_seq_lens
@@ -117,6 +118,8 @@ class CudaGraphManager:
         self.cudagraph_mode = cudagraph_mode
         self.decode_query_len = decode_query_len
         self.varlen_decode = varlen_decode
+        self.dynamic_mtp_graphs = dynamic_mtp_graphs_enabled(vllm_config)
+        self._logged_dispatches: set[tuple] = set()
 
         self.dp_size = vllm_config.parallel_config.data_parallel_size
         self.tp_size = vllm_config.parallel_config.tensor_parallel_size
@@ -197,6 +200,9 @@ class CudaGraphManager:
         if (
             speculative_config
             and speculative_config.uses_dynamic_speculative_decoding()
+            # Autoregressive draft decode always runs one token per request;
+            # applying the TARGET schedule here produces query lengths 1, 0.
+            and not (self.dynamic_mtp_graphs and self.decode_query_len == 1)
         ):
             num_spec_per_batch_size = (
                 speculative_config.num_speculative_tokens_per_batch_size
@@ -285,8 +291,18 @@ class CudaGraphManager:
             return
 
         all_token_counts = sorted({k[0] for k in descs_by_token_lora})
+        if self.dynamic_mtp_graphs:
+            # The nearest token size may only contain the OTHER query length.
+            # Keep larger candidates too; dispatch selects the first compatible
+            # shape, with smallest token count first. Build once, off hot path.
+            for n in range(all_token_counts[-1] + 1):
+                for lora in self.lora_capture_cases:
+                    self._candidates[(n, lora)] = [
+                        desc for size in all_token_counts if size >= n
+                        for desc in descs_by_token_lora.get((size, lora), ())
+                    ]
         current_range_start = 0
-        for token_cg_size in all_token_counts:
+        for token_cg_size in (() if self.dynamic_mtp_graphs else all_token_counts):
             for i in range(current_range_start, token_cg_size + 1):
                 for num_active_loras in self.lora_capture_cases:
                     staging_key = (token_cg_size, num_active_loras)
@@ -372,6 +388,11 @@ class CudaGraphManager:
                         self.graphs[desc] = graph
                         compilation_counter.num_cudagraph_captured += 1
         self._graphs_captured = True
+        if self.dynamic_mtp_graphs:
+            logger.info("[dynamic-mtp] captured manager=%s phase=%s shapes=%s",
+                        type(self).__name__, progress_bar_desc, sorted(
+                            (d.num_tokens, d.num_reqs, d.uniform_token_count)
+                            for d in self.graphs))
 
     def captured_token_counts(self) -> list[int]:
         """Sorted token counts with a captured graph, ignoring LoRA variants."""
@@ -402,6 +423,9 @@ class CudaGraphManager:
                     max_query_len,
                 ):
                     return desc
+        if self.dynamic_mtp_graphs and self._graphs_captured:
+            logger.debug("[dynamic-mtp] eager manager=%s reqs=%d tokens=%d query=%s",
+                         type(self).__name__, num_reqs, num_tokens, uniform_token_count)
         return BatchExecutionDescriptor(
             cg_mode=CUDAGraphMode.NONE,
             num_tokens=num_tokens,
@@ -423,6 +447,14 @@ class CudaGraphManager:
         # while those copies are still in flight.
         get_offloader().sync_prev_onload()
         self.graphs[desc].replay()
+        if self.dynamic_mtp_graphs:
+            key = (desc.num_tokens, desc.num_reqs, desc.uniform_token_count)
+            logger.debug("[dynamic-mtp] replay-step manager=%s mode=FULL "
+                         "tokens=%d reqs=%d query=%s", type(self).__name__, *key)
+            if key not in self._logged_dispatches:
+                self._logged_dispatches.add(key)
+                logger.info("[dynamic-mtp] replay manager=%s mode=FULL "
+                            "tokens=%d reqs=%d query=%s", type(self).__name__, *key)
 
     def init_breakable_cg_runner(self, model: nn.Module) -> None:
         if self.breakable_cg_runner is None:

@@ -14,6 +14,7 @@ The MTP draft model reuses the Qwen3.8-Flash-Next backbone (PLE/HC/MoE) but:
 """
 
 from collections.abc import Iterable
+from copy import copy
 
 import regex as re
 import torch
@@ -42,6 +43,7 @@ from vllm.model_executor.models.utils import (
     maybe_prefix,
 )
 from vllm.sequence import IntermediateTensors
+from vllm.v1.spec_decode.dynamic.mtp_graphs import dynamic_mtp_graphs_enabled
 from vllm.transformers_utils.configs.qwen3_8_flash_next import (
     Qwen3_8FlashNextTextConfig,
 )
@@ -143,11 +145,25 @@ def _make_draft_vllm_config(
     # observe the same resolved geometry.
     cache_config = vllm_config.cache_config
     target_mamba_block_size = cache_config.mamba_block_size
-    cache_config.mamba_block_size = None
+    draft_config_kwargs = {}
+    if dynamic_mtp_graphs_enabled(vllm_config):
+        # replace(VllmConfig) re-runs validation. The draft architecture is not
+        # a default V2 target, so its dynamic-SD policy would downgrade the
+        # SHARED target compilation config to PIECEWISE (then NONE with -O0).
+        # Draft layers do not schedule target verification. Keep their config
+        # local, but retain the shared static_forward_context for KV discovery.
+        draft_spec = copy(speculative_config)
+        draft_spec.num_speculative_tokens_per_batch_size = None
+        draft_config_kwargs = {
+            "compilation_config": copy(vllm_config.compilation_config),
+            "speculative_config": draft_spec,
+        }
     try:
+        cache_config.mamba_block_size = None
         draft_vllm_config = replace(
             vllm_config,
             model_config=speculative_config.draft_model_config,
+            **draft_config_kwargs,
         )
     finally:
         cache_config.mamba_block_size = target_mamba_block_size
