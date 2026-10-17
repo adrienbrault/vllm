@@ -1,0 +1,16 @@
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 56
+runtime/vllm-overlay/v1/ple_offload/worker.py
+  h_c86d546d9a059f 249-252,257,260-261
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4089c1fe4252ea3db5bbae7b3d0c6c9c5b6dc72f",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
