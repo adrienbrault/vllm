@@ -1,0 +1,20 @@
+docker/Dockerfile
+  h_c86d546d9a059f 12,15
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 13,39
+runtime/vllm-overlay/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/cpu_experts.py
+  h_c86d546d9a059f 48,55-56
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/low_latency_gemm.py
+  h_c86d546d9a059f 169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6c72d53c924429ab58827d6d7d8785ce399f4338",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
