@@ -171,6 +171,11 @@ def enable_qwen38next_low_latency_gemm(
     module: nn.Module,
     dtype: torch.dtype,
 ) -> None:
+    # Enroll before skinny methods are selected and before checkpoint loading.
+    # The loader finalizes each selected BF16 matrix into Marlin exactly once.
+    if _os.environ.get("QWEN38_W8_DENSE", "").strip().lower() not in ("", "0", "off"):
+        from .w8_dense import enroll
+        enroll(module, dtype)
     import logging
     log = logging.getLogger("vllm.qwen38.triton_skinny")
     # SM 8.6 (RTX 3090) and SM 8.9 (RTX 4090, issue #40: same kernel, identical output, ~10% faster decode).
@@ -267,6 +272,9 @@ def prepare_horizontal_gemms(module: nn.Module) -> None:
     Only known direct consumers are enrolled. In particular no MoE callback
     caches input-dependent results across an opaque/custom-op boundary.
     """
+    if _os.environ.get("QWEN38_W8_DENSE", "").strip().lower() not in ("", "0", "off"):
+        from .w8_dense import report_storage
+        report_storage(module)
     if _TRITON_SKINNY and _GLUON_THIN and not envs.VLLM_BATCH_INVARIANT:
         from .gluon_thin import MODE, prepare
         if MODE in ("1", "exact"):
