@@ -66,6 +66,9 @@ from vllm.v1.utils import record_function_or_nullcontext
 
 logger = init_logger(__name__)
 
+# Experimental PP decode-cohort balancing. Read once, before engine startup.
+_QWEN38_PP_BALANCE = os.environ.get("QWEN38_PP_BALANCE", "0") == "1"
+
 
 class Scheduler(SchedulerInterface):
     def __init__(
@@ -523,8 +526,95 @@ class Scheduler(SchedulerInterface):
             num_new_tokens -= self.num_prefill_lookahead - remaining
         return max(num_new_tokens, 0)
 
+    def _qwen38_balance_decode_cohorts(self) -> None:
+        """Move due decodes to the next phase, with one extra step of delay.
+
+        Only delay: AsyncScheduler still sets the pp_size minimum spacing.
+        PPHandler consumes feedback at the original due step even when the
+        request is absent, retaining samples/drafts in per-request worker state
+        until its next decode. No receive slots or placeholders are moved.
+        Recompute from live requests every step, including after completions.
+        """
+        pp_size = self.parallel_config.pipeline_parallel_size
+        if (
+            pp_size <= 1
+            or len(self.running) <= 1
+            or not self.use_v2_model_runner
+            or not self.scheduler_config.async_scheduling
+            or self._pause_state == PauseState.PAUSED_ALL
+        ):
+            return
+
+        counts = [0] * pp_size
+        tokens = [0] * pp_size
+        candidates: list[tuple[Request, int]] = []
+        phase = self.current_step % pp_size
+        next_phase = (phase + 1) % pp_size
+        for request in self.running:
+            if request.is_prefill_chunk or request.next_decode_eligible_step <= 0:
+                continue
+            if (
+                request.num_output_placeholders > 0
+                and request.num_computed_tokens + 2 - request.num_output_placeholders
+                >= request.num_prompt_tokens + request.max_tokens
+            ):
+                # The normal running loop also skips these known-final steps.
+                continue
+            # A budget/dependency miss can leave eligibility in the past; that
+            # request now belongs to the current phase and must not be delayed.
+            due = max(self.current_step, request.next_decode_eligible_step)
+            request_phase = due % pp_size
+            # Same token accounting as the running loop, including spec rows.
+            weight = max(
+                1,
+                request.num_tokens_with_spec
+                + request.num_output_placeholders
+                - request.num_computed_tokens,
+            )
+            counts[request_phase] += 1
+            tokens[request_phase] += weight
+            if (
+                request.next_decode_eligible_step == self.current_step
+                and getattr(request, "_qwen38_pp_deferred_step", -2)
+                != self.current_step - 1
+            ):
+                candidates.append((request, weight))
+
+        # Count balance comes first; choose the migration with the smallest
+        # resulting token-load difference. Stable ties preserve running order.
+        # With >2 phases, a count difference of one transports the heavy phase
+        # around the ring towards a lighter phase, without a multi-step delay.
+        while (
+            candidates
+            and max(counts) - min(counts) >= 2
+            and counts[phase] == max(counts)
+            and counts[next_phase] < counts[phase]
+        ):
+            request, weight = min(
+                candidates,
+                key=lambda item: abs(tokens[phase] - tokens[next_phase] - 2 * item[1]),
+            )
+            candidates.remove((request, weight))
+            request.next_decode_eligible_step += 1
+            request._qwen38_pp_deferred_step = self.current_step
+            counts[phase] -= 1
+            counts[next_phase] += 1
+            tokens[phase] -= weight
+            tokens[next_phase] += weight
+            logger.info(
+                "QWEN38_PP_BALANCE step=%d req=%s phase=%d->%d counts=%s tokens=%s",
+                self.current_step,
+                request.request_id,
+                phase,
+                next_phase,
+                counts,
+                tokens,
+            )
+
     def schedule(self, throttle_prefills: bool = False) -> SchedulerOutput:
         self.current_step += 1
+        if _QWEN38_PP_BALANCE:
+            self._qwen38_balance_decode_cohorts()
         # NOTE(woosuk) on the scheduling algorithm:
         # There's no "decoding phase" nor "prefill phase" in the scheduler.
         # Each request just has the num_computed_tokens and
