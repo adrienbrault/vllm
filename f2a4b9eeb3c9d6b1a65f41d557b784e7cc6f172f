@@ -1,0 +1,22 @@
+tests/v1/kv_offload/tiering/test_fs_tier_eviction.py
+  h_c86d546d9a059f 1-341
+vllm/v1/kv_offload/tiering/fs/manager.py
+  h_c86d546d9a059f 20-25,36-38,44,46-47,68,75-77,94,130-134,157-173,186-187,189-190,192-193,227-248,269-576,579-580,585-586,590-598,603-604,607-609,611-615,629-632,644-646,654-659,681-685,689-692,695,702-708,751-753,758-781
+vllm/v1/kv_offload/tiering/fs/thread_pool.py
+  h_c86d546d9a059f 130-136,185-189,193-199
+vllm/v1/kv_offload/tiering/metrics.py
+  h_c86d546d9a059f 24-33
+vllm/v1/kv_offload/tiering/spec.py
+  h_c86d546d9a059f 28-30,39-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f2a4b9eeb3c9d6b1a65f41d557b784e7cc6f172f",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}

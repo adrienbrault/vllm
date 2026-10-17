@@ -1,0 +1,48 @@
+flan/README.md
+  h_c86d546d9a059f 1-93
+flan/build/Dockerfile.A_S
+  h_c86d546d9a059f 1-18
+flan/build/Dockerfile.v0310
+  h_c86d546d9a059f 1-74
+flan/build/apply_layer.py
+  h_c86d546d9a059f 1-36
+flan/build/assert_sources.py
+  h_c86d546d9a059f 1-14
+flan/build/guard_flashinfer_workspace.py
+  h_c86d546d9a059f 1-66
+flan/overlay/build_overlay.py
+  h_c86d546d9a059f 1-86
+flan/overlay/diag_vsf_layout.py
+  h_c86d546d9a059f 1-135
+flan/overlay/overlay_binding.cpp
+  h_c86d546d9a059f 1-59
+flan/overlay/vllm_sm12x_nvfp4kv.py
+  h_c86d546d9a059f 1-58
+flan/pcie_ipc_ar21/NOTICE
+  h_c86d546d9a059f 1-18
+flan/pcie_ipc_ar21/__init__.py
+  h_c86d546d9a059f 1-6
+flan/pcie_ipc_ar21/build.py
+  h_c86d546d9a059f 1-84
+flan/pcie_ipc_ar21/csrc/bindings.cu
+  h_c86d546d9a059f 1-141
+flan/pcie_ipc_ar21/fixed_config.py
+  h_c86d546d9a059f 1-76
+flan/pcie_ipc_ar21/include/flashinfer/comm/pcie_ipc_all_reduce.cuh
+  h_c86d546d9a059f 1-2247
+flan/pcie_ipc_ar21/pcie-tune-free.json
+  h_c86d546d9a059f 1-75
+flan/pcie_ipc_ar21/workspace.py
+  h_c86d546d9a059f 1-203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d7dea2d241d642141d4f714d3aea139f22edebf6",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}

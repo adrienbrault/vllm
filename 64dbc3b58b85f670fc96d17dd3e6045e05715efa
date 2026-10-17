@@ -1,0 +1,16 @@
+vllm/v1/core/kv_cache_coordinator.py
+  h_c86d546d9a059f 108-112,114-118
+vllm/v1/core/kv_cache_utils.py
+  h_c86d546d9a059f 2256-2259,2261
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "64dbc3b58b85f670fc96d17dd3e6045e05715efa",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}

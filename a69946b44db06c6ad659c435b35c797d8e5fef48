@@ -1,0 +1,16 @@
+vllm/v1/spec_decode/llm_base_proposer.py
+  h_c86d546d9a059f 178-180,424-428,431-433,436-443,446,448-452,591-601,697-706,1659,1668-1685,1838-1839,1841-1861,1886-1899
+vllm/v1/worker/gpu_model_runner.py
+  h_c86d546d9a059f 6146-6155,6159-6165,6183-6202,7181-7193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a69946b44db06c6ad659c435b35c797d8e5fef48",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}

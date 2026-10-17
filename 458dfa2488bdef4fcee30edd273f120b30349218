@@ -1,0 +1,16 @@
+vllm/model_executor/models/qwen3_dflash2.py
+  h_c86d546d9a059f 299-302,310
+vllm/v1/worker/gpu/spec_decode/dflash/speculator.py
+  h_c86d546d9a059f 57-61,274-276,278,280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "458dfa2488bdef4fcee30edd273f120b30349218",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+vllm/model_executor/models/qwen3_5_mtp.py
+  h_c86d546d9a059f 85-94,151-153,254-258,266,322-324,328-329,332-335,338
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "81cb4afb59c76faf22a077b5d1da2ea14c307cdb",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}

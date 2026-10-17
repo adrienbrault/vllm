@@ -1,0 +1,16 @@
+vllm/envs.py
+  h_c86d546d9a059f 133,1229-1233
+vllm/third_party/flash_linear_attention/ops/fused_recurrent.py
+  h_c86d546d9a059f 11-12,15-16,18,352-382,481-486
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d53e0d017e8884f1ede453b38f49ec08a7208892",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}

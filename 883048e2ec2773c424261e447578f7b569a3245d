@@ -1,0 +1,18 @@
+vllm/config/speculative.py
+  h_c86d546d9a059f 1944-1952,1955-1958
+vllm/v1/core/kv_cache_utils.py
+  h_c86d546d9a059f 2146,2240
+vllm/v1/core/sched/scheduler.py
+  h_c86d546d9a059f 302-306
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "883048e2ec2773c424261e447578f7b569a3245d",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
