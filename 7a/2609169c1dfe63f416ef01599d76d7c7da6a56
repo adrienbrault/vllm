@@ -1,0 +1,32 @@
+docs/dynamic-mtp-scheduling.md
+  h_c86d546d9a059f 1-59
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 45,55,62-64,66
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/mtp.py
+  h_c86d546d9a059f 17,46,148-160,162,166
+runtime/vllm-overlay/v1/core/sched/scheduler.py
+  h_c86d546d9a059f 63,1418-1420
+runtime/vllm-overlay/v1/spec_decode/dynamic/mtp_graphs.py
+  h_c86d546d9a059f 1-21
+runtime/vllm-overlay/v1/worker/gpu/cudagraph_utils.py
+  h_c86d546d9a059f 33,121-122,203-205,294-303,305,391-395,426-428,450-457
+runtime/vllm-overlay/v1/worker/gpu/model_runner.py
+  h_c86d546d9a059f 66,247,252-258,312-315,1803-1806,1831,1929-1932,2111
+runtime/vllm-overlay/v1/worker/gpu/spec_decode/mtp/scheduled.py
+  h_c86d546d9a059f 1-98
+scripts/docker_serve.sh
+  h_c86d546d9a059f 54
+tests/test_dynamic_mtp_graphs.py
+  h_c86d546d9a059f 1-281
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7a2609169c1dfe63f416ef01599d76d7c7da6a56",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
