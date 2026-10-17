@@ -1,0 +1,16 @@
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 61
+runtime/vllm-overlay/v1/attention/backends/gdn_attn.py
+  h_c86d546d9a059f 1-724
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "95ef6f585f91576b0bbabd79b53c3d75e9ace11a",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
