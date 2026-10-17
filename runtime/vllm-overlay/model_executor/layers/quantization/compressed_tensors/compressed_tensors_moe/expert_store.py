@@ -56,8 +56,10 @@ def hot_sets() -> dict[int, list[int]]:
 
 class ExpertStore:
     def __init__(self):
-        if sorted(_HOT) != list(range(L)):
-            raise RuntimeError(f"expert store: hot sets registered for {len(_HOT)} of {L} layers")
+        from vllm.model_executor.layers.fused_moe.hot_only import local_layers
+        mine = local_layers(L)                # pipeline parallelism: this stage's layers; the others stay empty
+        if sorted(_HOT) != mine:
+            raise RuntimeError(f"expert store: hot sets registered for {len(_HOT)} of this stage's {len(mine)} layers")
         root = os.environ.get("QWEN38_CPU_EXPERTS_MODEL", "/model")
         weight_map = json.load(open(os.path.join(root, "model.safetensors.index.json")))["weight_map"]
         headers = {}
@@ -79,14 +81,18 @@ class ExpertStore:
         # reads them through a file mapping, prefill streams them through pinned bounce buffers.
         ranked = _ranked_ids(root)
         # This rank's cold experts: owned (all of them without expert parallelism) and not hot on its GPU.
-        cold_all = [[e for e in ranked[l] if e in _OWNED[l] and e not in set(_HOT[l])] for l in range(L)]
+        cold_all = [[e for e in ranked[l] if e in _OWNED[l] and e not in set(_HOT[l])] if l in _HOT else []
+                    for l in range(L)]
         total = sum(map(len, cold_all))
         from vllm import qwen38_host
         from vllm.model_executor.layers.fused_moe.hot_only import rank_and_size
         self.rank, self.ranks = rank_and_size()
         # QWEN38_EXPERT_ARENA_SLOTS (per rank), default: this rank's share of the RAM budget
         want = qwen38_host.arena_slots(total, L, ranks=self.ranks)
-        per_layer = [want // L + (1 if l < want % L else 0) for l in range(L)]
+        n = len(mine)
+        per_layer = [0] * L
+        for i, l in enumerate(mine):
+            per_layer[l] = want // n + (1 if i < want % n else 0)
         self.cold = [sorted(cold_all[l][:per_layer[l]]) for l in range(L)]
         self.tail = [sorted(cold_all[l][per_layer[l]:]) for l in range(L)]
         self.first_slot = []
@@ -220,7 +226,8 @@ class ExpertStore:
         logger.info("Expert store (rank %d/%d): %d cold experts in the arena (%d-%d per layer), %.2f GiB; huge "
                     "pages %.1f GiB after prefault (%.1f s), %.1f GiB after fill + collapse (%.1f s); filled %.2f GiB "
                     "in %.1f s, pinned in %.1f s; %d tail experts (%.2f GiB) on NVMe",
-                    self.rank, self.ranks, slots, min(map(len, self.cold)), max(map(len, self.cold)),
+                    self.rank, self.ranks, slots, min(len(self.cold[l]) for l in mine),
+                    max(len(self.cold[l]) for l in mine),
                     self.nbytes / 2**30,
                     huge_pop / 2**20, t_pop, huge / 2**20, t_col, filled / 2**30, t1 - t0 - t_col, t2 - t1,
                     tail_n, tail_n * USED / 2**30)

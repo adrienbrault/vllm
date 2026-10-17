@@ -81,6 +81,10 @@ export VLLM_WNA16_STATIC_HOT_CACHE_FILE=$rankings
 export VLLM_FORCE_DYNAMIC_SPEC_SCHEDULING=1
 
 hot_only=${QWEN38_HOT_ONLY:-0}
+# QWEN38_PP=2: pipeline parallelism, one stage of 24 layers per GPU (QWEN38_HOT_ONLY then counts all 512 experts of a
+# layer); default 1 = tensor/expert parallelism over both GPUs.
+pp=${QWEN38_PP:-1}
+[[ "$pp" == 1 || "$pp" == 2 ]] || { echo "QWEN38_PP must be 1 or 2" >&2; exit 2; }
 [[ "$hot_only" =~ ^[0-9]+$ ]] || { echo "QWEN38_HOT_ONLY must be a number of experts" >&2; exit 2; }
 if (( hot_only > 0 )); then
   # 64 GB profile (configs/2x3090-64gb.env): each GPU owns QWEN38_HOT_ONLY experts per layer outright; the other
@@ -97,8 +101,8 @@ if (( hot_only > 0 )); then
   host_py=${QWEN38_HOST_PY:-$(python3 -c 'import importlib.util, os; print(os.path.join(os.path.dirname(importlib.util.find_spec("vllm").origin), "qwen38_host.py"))')}
   while IFS='=' read -r key value; do
     export "$key=$value"
-  done < <(python3 "$host_py" --env --ranks 2)
-  python3 "$host_py" --ranks 2 | sed 's/^/[qwen38-64gb] /'
+  done < <(python3 "$host_py" --env --ranks 2 --pp "$pp")
+  python3 "$host_py" --ranks 2 --pp "$pp" | sed 's/^/[qwen38-64gb] /'
 else
   export VLLM_WNA16_DYNAMIC_LRU=1
   export VLLM_WNA16_MIXED_VMM_HOT_CACHE=1
@@ -112,7 +116,7 @@ read -r -a extra_vllm_args <<< "${EXTRA_VLLM_ARGS:-}"
 exec vllm serve "$model" \
   --served-model-name "$SERVED_MODEL_NAME" \
   --host 0.0.0.0 --port "$PORT" \
-  --tensor-parallel-size 2 \
+  --tensor-parallel-size $((2 / pp)) --pipeline-parallel-size "$pp" \
   --enable-expert-parallel \
   --all2all-backend allgather_reducescatter \
   --moe-backend humming \

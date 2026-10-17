@@ -1670,7 +1670,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
             mine[torch.tensor(owned, dtype=torch.long, device=share_map.device)] = True
             share_map[~mine] = 0
         self._hot_only_share_map = share_map
-        if len(stream_v2._layers) == expert_store.L:
+        if len(stream_v2._layers) == len(hot_only.local_layers(expert_store.L)):
             # Last target layer: fill the host store and set up streaming before any forward pass
             # (the first decode forward runs inside CUDA graph capture).
             stream_v2.prepare(layer.w13_weight_packed.device)

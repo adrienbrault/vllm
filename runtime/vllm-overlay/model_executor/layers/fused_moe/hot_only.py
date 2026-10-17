@@ -55,13 +55,26 @@ def hot_ids(layer: int, global_num_experts: int, owned=None) -> list[int]:
 
 
 def rank_and_size() -> tuple[int, int]:
-    """(rank, size) of this worker in the tensor-parallel group, which is also the expert-parallel group here."""
+    """(rank, size) of this GPU worker among all of them (pipeline stage x tensor rank): one CPU pool and one share of
+    the RAM budget each. The tensor-parallel group is also the expert-parallel group here."""
     try:
         from vllm.distributed import parallel_state
-        group = parallel_state.get_tp_group()
-        return group.rank_in_group, group.world_size
+        tp, pp = parallel_state.get_tp_group(), parallel_state.get_pp_group()
+        return pp.rank_in_group * tp.world_size + tp.rank_in_group, pp.world_size * tp.world_size
     except Exception:
         return 0, 1
+
+
+def local_layers(total: int = 48) -> list[int]:
+    """The decoder layers of this pipeline stage (all of them without pipeline parallelism)."""
+    try:
+        from vllm.distributed import parallel_state
+        from vllm.distributed.utils import get_pp_indices
+        pp = parallel_state.get_pp_group()
+    except Exception:
+        return list(range(total))
+    start, end = get_pp_indices(total, pp.rank_in_group, pp.world_size)
+    return list(range(start, end))
 
 
 def apply_placement(manager, layer_name: str, global_num_experts: int) -> None:

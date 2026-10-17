@@ -74,8 +74,9 @@ class _Service:
     def __init__(self):
         from vllm import qwen38_host
         self.ext = extension()
-        if sorted(_HOT) != list(range(L)):
-            raise RuntimeError(f"CPU experts: hot sets registered for {len(_HOT)} of {L} layers")
+        from vllm.model_executor.layers.fused_moe.hot_only import local_layers
+        if sorted(_HOT) != local_layers(L):     # pipeline parallelism: this stage's layers only
+            raise RuntimeError(f"CPU experts: hot sets registered for {len(_HOT)} of this stage's layers")
         self._maps = {}
         self.dynamic = False
         from vllm.model_executor.layers.fused_moe import hot_only
@@ -103,7 +104,9 @@ class _Service:
                     prefix = f"model.language_model.layers.{l}.mlp.experts.{e}."
                     for i, (proj, kind) in enumerate(_PARTS):
                         self.table[l, e, i] = self._addr(root, wm, prefix + proj + "." + kind)
-        self.skip = torch.zeros(L, E, dtype=torch.uint8)
+        self.skip = torch.ones(L, E, dtype=torch.uint8)  # layers of other pipeline stages: never computed here
+        for l in _HOT:
+            self.skip[l] = 0
         for l, ids in _HOT.items():
             self.skip[l, ids] = 1
         for l, owned in _OWNED.items():          # the other rank computes its own experts
@@ -133,7 +136,7 @@ class _Service:
         self.ext.start_server(self.table, self.skip, self.req_addr, self.resp_addr, L, len(cpus), cpus,
                               self.req_big.data_ptr(), self.resp_big.data_ptr())
         logger.info("CPU experts (rank %d/%d): %d layers, %d hot experts/layer on GPU, %d pool threads on CPUs %s, "
-                    "serving threads on CPUs %s, %d files mapped", rank, ranks, L, len(_HOT[0]), len(cpus),
+                    "serving threads on CPUs %s, %d files mapped", rank, ranks, len(_HOT), len(next(iter(_HOT.values()))), len(cpus),
                     qwen38_host.format_cpus(cpus), qwen38_host.format_cpus(main), len(self._maps))
 
     def _addr(self, root, wm, name):

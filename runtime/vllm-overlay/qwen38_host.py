@@ -223,18 +223,19 @@ def arena_slots(total_cold: int, layers: int = 48, proc_root: str = _PROC, cgrou
     return max(min(layers, total_cold), min(total_cold, want))
 
 
-def cold_per_rank(hot: int, ranks: int, experts: int = 512, layers: int = 48) -> int:
-    return layers * (experts // ranks - hot)
+def cold_per_rank(hot: int, ranks: int, experts: int = 512, layers: int = 48, pp: int = 1) -> int:
+    """Cold experts of one rank: its pipeline stage's layers x (its expert-parallel share - hot)."""
+    return layers // pp * (experts // (ranks // pp) - hot)
 
 
-def describe(hot: int = 32, ranks: int = 1) -> str:
+def describe(hot: int = 32, ranks: int = 1, pp: int = 1) -> str:
     pools = all_pools(ranks)
     main = main_cpus(ranks=ranks)
     try:
         budget, source = memory_budget_bytes()
     except (OSError, RuntimeError):
         budget, source = 0, "unknown"
-    total = cold_per_rank(hot, ranks)
+    total = cold_per_rank(hot, ranks, pp=pp)
     slots = arena_slots(total, ranks=ranks)
     tail = total - slots
     lines = []
@@ -255,13 +256,14 @@ if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--env", action="store_true", help="print the resolved settings as KEY=VALUE lines")
-    ap.add_argument("--ranks", type=int, default=1, help="GPU ranks (tensor/expert parallel size)")
+    ap.add_argument("--ranks", type=int, default=1, help="GPU ranks (pipeline x tensor/expert parallel size)")
+    ap.add_argument("--pp", type=int, default=1, help="pipeline-parallel size")
     args = ap.parse_args()
     hot = int(os.environ.get("QWEN38_HOT_ONLY", "32"))
     if args.env:
         pools = all_pools(args.ranks)
         print(f"QWEN38_CPU_EXPERTS_CPUS={';'.join(format_cpus(p) for p in pools)}")
         print(f"QWEN38_MAIN_CPUS={format_cpus(main_cpus(ranks=args.ranks))}")
-        print(f"QWEN38_EXPERT_ARENA_SLOTS={arena_slots(cold_per_rank(hot, args.ranks), ranks=args.ranks)}")
+        print(f"QWEN38_EXPERT_ARENA_SLOTS={arena_slots(cold_per_rank(hot, args.ranks, pp=args.pp), ranks=args.ranks)}")
     else:
-        print(describe(hot, args.ranks))
+        print(describe(hot, args.ranks, args.pp))
