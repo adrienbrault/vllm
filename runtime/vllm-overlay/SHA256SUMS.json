@@ -51,7 +51,7 @@
   "v1/attention/backends/short_conv_attn.py": "5364d471335696e88aa258b47fcd6f686b261356ba8ddf6da6fa3e26e3783d8a",
   "v1/core/sched/scheduler.py": "b7f1ecfca23811a6c730949b5d4084150a19e64b0ff3abd39ceba58c54748648",
   "v1/core/single_type_kv_cache_manager.py": "ff96edcb5920b88909ce8847d731802b7b52c906dff9fd74e2bdac7d8e8fdd28",
-  "v1/ple_offload/connector.py": "0821002743589a4f050a04131e3896caf6edbaaebb8f6c4f58af9bd7da85c9b1",
+  "v1/ple_offload/connector.py": "9cc78d3e52116f980c85aaa3d1fca07a314f0d617963e28ee3d73ed1a1ca23c5",
   "v1/ple_offload/protocol.py": "38706b843d0f59ca4e296fc799c4fb47e2560db001829028cd4c91151ff5628a",
   "v1/ple_offload/worker.py": "c611820402128149524be4709908a08ca72691a8651c317f3939b13583187884",
   "v1/worker/gpu/cudagraph_utils.py": "572b84ffe109b0619caa841d1f862849b285e2753aac56360344b0b0052e04d6",
