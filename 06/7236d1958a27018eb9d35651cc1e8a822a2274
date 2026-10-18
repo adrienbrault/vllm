@@ -1,0 +1,32 @@
+docs/w8-dense.md
+  h_c86d546d9a059f 20-25,30-33
+docs/w8-head.md
+  h_c86d546d9a059f 1-90
+runtime/vllm-overlay/SHA256SUMS.json
+  h_c86d546d9a059f 40,45,52,60-62
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/draft_vocab.py
+  h_c86d546d9a059f 38,47-61,91,93-98,105,108
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/low_latency_gemm.py
+  h_c86d546d9a059f 188-192
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/mtp.py
+  h_c86d546d9a059f 436-442
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/w8_dense.py
+  h_c86d546d9a059f 5-6,174-184,208-212,221-225,227-233,235
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/w8_dense_policy.py
+  h_c86d546d9a059f 16-20,41-43,67-98
+runtime/vllm-overlay/models/qwen3_8_flash_next/nvidia/w8_head.py
+  h_c86d546d9a059f 1-165
+tests/test_w8_head_cpu.py
+  h_c86d546d9a059f 1-387
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "067236d1958a27018eb9d35651cc1e8a822a2274",
+  "prompts": {},
+  "humans": {
+    "h_c86d546d9a059f": {
+      "author": "Adrien Brault <adrien.brault@gmail.com>"
+    }
+  }
+}
