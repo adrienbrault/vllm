@@ -35,7 +35,7 @@ def parse_ranges(value: str, vocab_size: int) -> tuple[tuple[int, int], ...]:
 
 
 def local_top_pair(hidden_states, weight, shard_start, shard_end, ranges,
-                   *, scale=1.0, soft_cap=None):
+                   *, scale=1.0, soft_cap=None, project_range=None):
     """Return (logit, global token ID) per row; exclude shard padding."""
     if scale <= 0:
         raise ValueError("greedy draft reduction requires a positive scale")
@@ -44,18 +44,21 @@ def local_top_pair(hidden_states, weight, shard_start, shard_end, ranges,
         start, end = max(start, shard_start), min(end, shard_end)
         if start >= end:
             continue
-        # A view, never index_select/contiguous: no duplicate head allocation.
-        selected_weight = weight[start - shard_start:end - shard_start]
-        logits = None
-        if _GLUON_THIN:
-            from .gluon_thin import try_mm
-            logits = try_mm(hidden_states, selected_weight)
-        if logits is None and (hidden_states.shape[0] <= _MAX_M and hidden_states.dtype == torch.bfloat16
-                and selected_weight.is_contiguous() and hidden_states.is_contiguous()):
-            from .triton_skinny import skinny_mm
-            logits = skinny_mm(hidden_states, selected_weight)
-        elif logits is None:
-            logits = F.linear(hidden_states, selected_weight)
+        if project_range is not None:
+            logits = project_range(hidden_states, start, end)
+        else:
+            # A view, never index_select/contiguous: no duplicate BF16 head.
+            selected_weight = weight[start - shard_start:end - shard_start]
+            logits = None
+            if _GLUON_THIN:
+                from .gluon_thin import try_mm
+                logits = try_mm(hidden_states, selected_weight)
+            if logits is None and (hidden_states.shape[0] <= _MAX_M and hidden_states.dtype == torch.bfloat16
+                    and selected_weight.is_contiguous() and hidden_states.is_contiguous()):
+                from .triton_skinny import skinny_mm
+                logits = skinny_mm(hidden_states, selected_weight)
+            elif logits is None:
+                logits = F.linear(hidden_states, selected_weight)
         if soft_cap is not None:
             logits = torch.tanh(logits / soft_cap) * soft_cap
         if scale != 1.0:
@@ -85,18 +88,24 @@ def reduce_top_pairs(gathered, tp_size):
 
 def get_top_tokens(processor, lm_head, hidden_states, ranges, all_gather):
     from vllm.model_executor.layers.vocab_parallel_embedding import UnquantizedEmbeddingMethod
+    from .w8_head import Qwen38W8HeadMethod
 
-    if not isinstance(lm_head.quant_method, UnquantizedEmbeddingMethod):
-        raise ValueError("reduced draft vocabulary requires an unquantized LM head")
+    method = lm_head.quant_method
+    is_w8 = isinstance(method, Qwen38W8HeadMethod)
+    packed = method.draft_packed(lm_head) if is_w8 else None
+    if packed is None and not (isinstance(method, UnquantizedEmbeddingMethod)
+                               or (is_w8 and method.preserve_bf16)):
+        raise ValueError("reduced draft vocabulary requires a BF16 or Qwen38 W8 LM head")
     if processor.head_dtype not in (None, hidden_states.dtype):
         raise ValueError("reduced draft vocabulary does not support a separate head dtype")
     if hidden_states.ndim != 2:
         raise ValueError("expected [tokens, hidden] draft states")
     shard = lm_head.shard_indices
     pair = local_top_pair(
-        hidden_states, lm_head.weight, shard.org_vocab_start_index,
+        hidden_states, None if packed is not None else lm_head.weight, shard.org_vocab_start_index,
         min(shard.org_vocab_end_index, processor.org_vocab_size), ranges,
         scale=processor.scale, soft_cap=processor.soft_cap,
+        project_range=packed.project_range if packed is not None else None,
     )
     if lm_head.tp_size > 1:
         pair = all_gather(pair, dim=-1)

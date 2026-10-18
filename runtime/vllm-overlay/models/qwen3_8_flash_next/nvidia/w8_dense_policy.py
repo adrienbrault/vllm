@@ -13,7 +13,11 @@ INVENTORY = (
     ("out", 2560, 6144, 24),
     ("indexer", 640, 2560, 6),
 )
-SCOPES = frozenset(row[0] for row in INVENTORY)
+DEFAULT_SCOPES = frozenset(row[0] for row in INVENTORY)
+HEAD_SCOPES = frozenset(("head", "draft_head"))
+SCOPES = DEFAULT_SCOPES | HEAD_SCOPES
+HEAD_SHAPE = (248320, 2560)
+DRAFT_RANGES = ((0, 65536), (248044, 248320))
 
 
 @dataclass(frozen=True)
@@ -34,7 +38,9 @@ def settings(environ=None):
         "QWEN38_W8_SCOPE", "gdn,qsa,out,indexer").split(","))
     if not scopes or not scopes <= SCOPES:
         raise ValueError("QWEN38_W8_SCOPE must be a comma-separated subset of "
-                         "gdn,qsa,out,indexer")
+                         "gdn,qsa,out,indexer,head,draft_head")
+    if scopes & HEAD_SCOPES and mode != "int8":
+        raise ValueError("head and draft_head require QWEN38_W8_DENSE=int8")
     group = env.get("QWEN38_W8_GROUP_SIZE", "-1")
     if group not in ("-1", "128"):
         raise ValueError("QWEN38_W8_GROUP_SIZE must be -1 (channel) or 128")
@@ -58,7 +64,38 @@ def projection_scope(name, shape):
     return None
 
 
-def stage_storage(group_size=-1, scopes=SCOPES, sms=0):
+def head_segments(vocab_size, ranges=()):
+    """Partition the FULL head at reduced-range boundaries, in token order.
+
+    Complement segments preserve the unrestricted compute_logits contract.
+    Each segment is packed once; reduced argmax evaluates only selected ones.
+    parse_ranges validates sorted/disjoint/in-bounds ranges before this call.
+    """
+    boundaries = sorted({0, vocab_size, *(i for pair in ranges for i in pair)})
+    return tuple(zip(boundaries[:-1], boundaries[1:]))
+
+
+def head_storage(group_size=-1, sms=0, ranges=(), retain_bf16=False):
+    """One physical shared head, including N padding and optional BF16 storage.
+
+    A single selected caller retains BF16 for the other caller. Both scopes
+    can release it; do not sum two independent head savings on a shared module.
+    """
+    if group_size not in (-1, 128):
+        raise ValueError("unsupported W8 group size")
+    n, k = HEAD_SHAPE
+    segments = head_segments(n, ranges)
+    padded_n = sum(((b - a + 63) // 64) * 64 for a, b in segments)
+    after = padded_n * (k + 2 * (1 if group_size == -1 else k // 128))
+    after += 4 * sms * len(segments)
+    before = 2 * n * k
+    retained = before if retain_bf16 else 0
+    return dict(segments=len(segments), padded_rows=padded_n,
+                bf16_bytes=before, w8_bytes=after, retained_bf16_bytes=retained,
+                total_bytes=after + retained, freed_bytes=before - after - retained)
+
+
+def stage_storage(group_size=-1, scopes=DEFAULT_SCOPES, sms=0):
     """Persistent tensor bytes, not measured allocator/driver memory."""
     if group_size not in (-1, 128):
         raise ValueError("unsupported W8 group size")

@@ -17,15 +17,20 @@ the PP24/TP1 target:
 | indexer | (640,2560), replicated Q/K | 6 |
 
 The gates already fused inside QKVZ/QSA matrices share their quantization.
-Separate GDN BA/control, HC, routers, shared experts, PLE, vocabulary heads,
-vision and the MTP draft remain under their original methods. Changing TP
-geometry is outside this allowlist.
+Separate GDN BA/control, HC, routers, shared experts, PLE, vision and the MTP
+backbone remain under their original methods. Vocabulary heads also retain
+their original methods unless the separate `head` / `draft_head` scopes are
+explicitly selected with INT8; see [w8-head.md](w8-head.md). These two scopes
+are absent from the default selection. Changing TP geometry is outside this
+allowlist.
 
 Scales are symmetric per output channel by default. Set
 `QWEN38_W8_GROUP_SIZE=128` only as a separately measured arm. INT8 uses biased
 `uint8b128`, FP8 uses E4M3FN; both retain BF16 activations and FP32 reductions.
-No activation quantization or new CUDA kernels are added. No BF16 fallback
-weight is retained for prefill. The normal LinearBase wrappers still own TP
+No activation quantization or new CUDA kernels are added. Dense projections
+retain no BF16 fallback weight for prefill. Single-scope shared vocabulary
+heads retain BF16 for the unselected caller; see the head guide above.
+The normal LinearBase wrappers still own TP
 reductions, bias and output tuple behavior.
 
 Conversion is enrolled before weight loading and runs through the normal

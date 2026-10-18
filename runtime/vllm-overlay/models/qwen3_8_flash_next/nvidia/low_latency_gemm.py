@@ -185,6 +185,11 @@ def enable_qwen38next_low_latency_gemm(
     if _TRITON_SKINNY and dtype == torch.bfloat16 and supported:
         shapes = []
         for child in module.modules():
+            method = getattr(child, "quant_method", None)
+            if isinstance(child, ParallelLMHead) and getattr(method, "preserve_bf16", False):
+                # W8 shared heads retain BF16 for the unselected caller. Keep
+                # that caller's original skinny/full-prefill dispatch as well.
+                method.bf16_method = Qwen38NextLowLatencyEmbeddingMethod()
             is_linear = (isinstance(child, LinearBase)
                          and type(child.quant_method) is UnquantizedLinearMethod)
             is_head = (isinstance(child, ParallelLMHead)

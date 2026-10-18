@@ -433,7 +433,13 @@ class Qwen3_8FlashNextMTP(nn.Module, SupportsPP, Qwen3_8FlashNextMixtureOfExpert
         else:
             self.lm_head = PPMissingLayer()
 
-        self.logits_processor = LogitsProcessor(config.vocab_size)
+        _q38_processor = LogitsProcessor
+        if _q38_os.environ.get("QWEN38_W8_DENSE", "").strip().lower() not in ("", "0", "off"):
+            from .w8_dense_policy import HEAD_SCOPES, settings as _q38_w8_settings
+            if _q38_w8_settings().scopes & HEAD_SCOPES:
+                from .w8_head import DraftLogitsProcessor
+                _q38_processor = DraftLogitsProcessor
+        self.logits_processor = _q38_processor(config.vocab_size)
         from .draft_vocab import parse_ranges as _q38_parse_ranges
         _q38_ranges = _q38_os.environ.get("VLLM_MTP_DRAFT_VOCAB_RANGES", "")
         self._draft_vocab_ranges = (

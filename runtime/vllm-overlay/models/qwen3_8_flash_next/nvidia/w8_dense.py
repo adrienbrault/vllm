@@ -2,7 +2,8 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Experimental W8A16 dense projections using the installed Marlin kernels.
 
-No activation quantization, CPU fallback or retained BF16 weight. Packed tensors
+No activation quantization or CPU fallback. Dense weights are replaced; heads
+may retain BF16 for an unselected caller sharing the module. Packed tensors
 are runtime artifacts, not a reloadable checkpoint format; restart to refit.
 """
 
@@ -170,9 +171,17 @@ def enroll(module, dtype):
     config = settings()
     if config is None:
         return
-    # This experiment changes target weights only; MTP retains its prior policy.
-    if type(module).__name__ == "Qwen3_8FlashNextMTP":
-        return
+    head_count = 0
+    if config.scopes & {"head", "draft_head"}:
+        from .w8_head import enroll_heads
+        head_count = enroll_heads(module, dtype, config)
+    # MTP backbone remains under its prior policy, even when draft_head is on.
+    if (type(module).__name__ == "Qwen3_8FlashNextMTP"
+            or not config.scopes & {"gdn", "qsa", "out", "indexer"}):
+        log.warning("W8_DENSE enrolled %d modules (0 projections, %d head modules), "
+                    "mode=%s group=%d scopes=%s", head_count, head_count,
+                    config.mode, config.group_size, sorted(config.scopes))
+        return  # head-only is a legitimate no-op on a non-last PP rank
     if dtype != torch.bfloat16:
         raise ValueError("QWEN38_W8_DENSE requires a BF16 model")
     if torch.cuda.get_device_capability() != (8, 0):
@@ -196,9 +205,11 @@ def enroll(module, dtype):
         selected.append((name, scope, tuple(weight.shape)))
     if not selected:
         raise ValueError("QWEN38_W8_DENSE selected no target PP24 projections")
-    log.warning("W8_DENSE changes target numerics: enrolled %d projections, mode=%s "
-                "group=%d scopes=%s; draft/control/HC/router remain BF16",
-                len(selected), config.mode, config.group_size, sorted(config.scopes))
+    log.warning("W8_DENSE changes selected caller numerics: enrolled %d modules "
+                "(%d projections, %d head modules), mode=%s "
+                "group=%d scopes=%s; draft backbone/control/HC/router remain BF16",
+                len(selected) + head_count, len(selected), head_count,
+                config.mode, config.group_size, sorted(config.scopes))
 
 
 def report_storage(module):
@@ -207,7 +218,18 @@ def report_storage(module):
     if not packed:
         return
     before = sum(2 * child.n * child.k for child in packed)
+    # Packed head parts include private N padding, which never existed in BF16.
+    heads = [getattr(child, "_qwen38_w8_head", None) for child in module.modules()]
+    for head in heads:
+        if head is not None:
+            before -= 2 * head.k * (sum(part.n for part in head.parts) - head.n)
     after = sum(child.storage_bytes for child in packed)
-    log.warning("W8_DENSE_TOTAL layers=%d bf16_bytes=%d w8_bytes=%d freed_bytes=%d "
+    retained = sum(child.weight.numel() * child.weight.element_size()
+                   for child in module.modules()
+                   if getattr(child, "_qwen38_w8_head", None) is not None
+                   and hasattr(child, "weight"))
+    after += retained
+    log.warning("W8_DENSE_TOTAL layers=%d bf16_bytes=%d total_bytes=%d "
+                "retained_bf16_bytes=%d freed_bytes=%d "
                 "freed_GiB=%.6f (live tensor storage; allocator reserve may persist)",
-                len(packed), before, after, before - after, (before - after) / 1024**3)
+                len(packed), before, after, retained, before - after, (before - after) / 1024**3)
